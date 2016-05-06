@@ -27,7 +27,7 @@ HEADERS += \
     ./SourceFiles/_other/memain.h \
     ./SourceFiles/_other/genemoji.h \
 
-INCLUDEPATH += ./../../Libraries/QtStatic/qtbase/include/QtGui/5.5.1/QtGui\
-               ./../../Libraries/QtStatic/qtbase/include/QtCore/5.5.1/QtCore\
-               ./../../Libraries/QtStatic/qtbase/include\
+INCLUDEPATH += /opt/telegram-qtstatic/include/QtGui/5.5.1/QtGui\
+               /opt/telegram-qtstatic/include/QtCore/5.5.1/QtCore\
+               /opt/telegram-qtstatic/include\
 
