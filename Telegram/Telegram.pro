@@ -10,7 +10,6 @@ CONFIG(debug, debug|release) {
     DESTDIR = ./../Debug
 }
 CONFIG(release, debug|release) {
-    DEFINES += CUSTOM_API_ID
     OBJECTS_DIR = ./../ReleaseIntermediate
     MOC_DIR = ./GeneratedFiles/Release
     RCC_DIR = ./GeneratedFiles
@@ -21,7 +20,6 @@ macx {
     QMAKE_INFO_PLIST = ./SourceFiles/Telegram.plist
     OBJECTIVE_SOURCES += ./SourceFiles/pspecific_mac_p.mm
     OBJECTIVE_HEADERS += ./SourceFiles/pspecific_mac_p.h
-    QMAKE_LFLAGS += -framework Cocoa
 }
 
 linux {
@@ -31,21 +29,21 @@ linux {
 
 codegen_style.target = style_target
 codegen_style.depends = FORCE
-codegen_style.commands = ./../codegen/Debug/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
+codegen_style.commands = ./../codegen/Release/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
 
 codegen_numbers.target = numbers_target
 codegen_numbers.depends = ./../../Telegram/Resources/numbers.txt
-codegen_numbers.commands = ./../codegen/Debug/codegen_numbers "-o./GeneratedFiles" "./../../Telegram/Resources/numbers.txt"
+codegen_numbers.commands = ./../codegen/Release/codegen_numbers "-o./GeneratedFiles" "./../../Telegram/Resources/numbers.txt"
 
 CONFIG(debug, debug|release) {
-codegen_numbers.commands = cd ../../Telegram && ./../Linux/codegen/Debug/codegen_numbers "-o./../Linux/DebugIntermediate/GeneratedFiles" "./Resources/numbers.txt" && cd ../Linux/DebugIntermediate
+codegen_numbers.commands = cd ../../Telegram && ./../Linux/codegen/Release/codegen_numbers "-o./../Linux/ReleaseIntermediate/GeneratedFiles" "./Resources/numbers.txt" && cd ../Linux/ReleaseIntermediate
 }
 CONFIG(release, debug|release) {
 }
 
 codegen_lang.target = lang_target
 codegen_lang.depends = ./../../Telegram/Resources/langs/lang.strings
-codegen_lang.commands = mkdir -p ./GeneratedFiles && ./../DebugLang/MetaLang -lang_in ./../../Telegram/Resources/langs/lang.strings -lang_out ./GeneratedFiles/lang_auto
+codegen_lang.commands = mkdir -p ./GeneratedFiles && ./../ReleaseLang/MetaLang -lang_in ./../../Telegram/Resources/langs/lang.strings -lang_out ./GeneratedFiles/lang_auto
 
 QMAKE_EXTRA_TARGETS += codegen_style codegen_numbers codegen_lang
 
@@ -327,67 +325,29 @@ HEADERS += \
 }
 
 SOURCES += \
-  ./ThirdParty/minizip/zip.c \
-  ./ThirdParty/minizip/ioapi.c
 
 CONFIG += precompile_header
 
 PRECOMPILED_HEADER = ./SourceFiles/stdafx.h
 
-QMAKE_CXXFLAGS_WARN_ON += -Wno-unused-result -Wno-unused-parameter -Wno-unused-variable -Wno-switch -Wno-comment -Wno-unused-but-set-variable
-QMAKE_CFLAGS_WARN_ON += -Wno-unused-result -Wno-unused-parameter -Wno-unused-variable -Wno-switch -Wno-comment -Wno-unused-but-set-variable
 
 CONFIG(release, debug|release) {
-    QMAKE_CXXFLAGS_RELEASE -= -O2
-    QMAKE_CXXFLAGS_RELEASE += -Ofast -flto -fno-strict-aliasing -g
-    QMAKE_LFLAGS_RELEASE -= -O1
-    QMAKE_LFLAGS_RELEASE += -Ofast -flto -g -rdynamic -static-libstdc++
 }
 # Linux 32bit fails Release link with Link-Time Optimization: virtual memory exhausted
 unix {
     !contains(QMAKE_TARGET.arch, x86_64) {
         CONFIG(release, debug|release) {
-            QMAKE_CXXFLAGS_RELEASE -= -flto
-            QMAKE_LFLAGS_RELEASE -= -flto
         }
     }
 }
 CONFIG(debug, debug|release) {
-	QMAKE_LFLAGS_DEBUG += -g -rdynamic -static-libstdc++
 }
 
-INCLUDEPATH += /usr/local/tdesktop/Qt-5.6.0/include/QtGui/5.6.0/QtGui\
-               /usr/local/tdesktop/Qt-5.6.0/include/QtCore/5.6.0/QtCore\
-               /usr/local/tdesktop/Qt-5.6.0/include\
-               /usr/local/include\
-               /usr/local/include/opus\
+INCLUDEPATH += /opt/telegram-qtstatic/include/QtGui/5.5.1/QtGui\
+               /opt/telegram-qtstatic/include/QtCore/5.5.1/QtCore\
+               /opt/telegram-qtstatic/include\
                ./SourceFiles\
                ./GeneratedFiles\
-               ./ThirdParty/minizip\
-               ./../../Libraries/breakpad/src
-
-INCLUDEPATH += "/usr/include/libappindicator-0.1"
-INCLUDEPATH += "/usr/include/gtk-2.0"
-INCLUDEPATH += "/usr/include/glib-2.0"
-INCLUDEPATH += "/usr/lib/x86_64-linux-gnu/glib-2.0/include"
-INCLUDEPATH += "/usr/lib/i386-linux-gnu/glib-2.0/include"
-INCLUDEPATH += "/usr/include/cairo"
-INCLUDEPATH += "/usr/include/pango-1.0"
-INCLUDEPATH += "/usr/lib/x86_64-linux-gnu/gtk-2.0/include"
-INCLUDEPATH += "/usr/lib/i386-linux-gnu/gtk-2.0/include"
-INCLUDEPATH += "/usr/include/gdk-pixbuf-2.0"
-INCLUDEPATH += "/usr/include/atk-1.0"
-
-INCLUDEPATH += "/usr/include/dee-1.0"
-INCLUDEPATH += "/usr/include/libdbusmenu-glib-0.4"
-
-LIBS += -ldl -llzma -lopenal -lavformat -lavcodec -lswresample -lswscale -lavutil -lopus -lva
-LIBS += /usr/local/tdesktop/Qt-5.6.0/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.a \
-        /usr/local/tdesktop/Qt-5.6.0/plugins/platforminputcontexts/libibusplatforminputcontextplugin.a \
-        /usr/local/tdesktop/Qt-5.6.0/plugins/platforminputcontexts/libfcitxplatforminputcontextplugin.a
-LIBS += /usr/local/lib/libz.a
-LIBS += /usr/local/lib/libxkbcommon.a
-LIBS += ./../../../Libraries/breakpad/src/client/linux/libbreakpad_client.a
 
 RESOURCES += \
     ./Resources/telegram.qrc \
@@ -404,3 +364,38 @@ OTHER_FILES += \
     ./Resources/langs/lang_de.strings \
     ./Resources/langs/lang_nl.strings \
     ./Resources/langs/lang_pt_BR.strings
+LIBS +=  -lappindicator3 -ldbusmenu-glib -lgtk-3 -lgdk-3 -lpangocairo-1.0 -lpango-1.0 -latk-1.0 -lcairo-gobject -lcairo -lgdk_pixbuf-2.0 -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lminizip -lopus -lavcodec -lavformat -lavutil -llzma -lswresample -lswscale -lva -lopenal -lssl -lcrypto -lxkbcommon -lz
+LIBS += /opt/telegram-qtstatic/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.a \
+        /opt/telegram-qtstatic/plugins/platforminputcontexts/libibusplatforminputcontextplugin.a \
+        /opt/telegram-qtstatic/plugins/platforminputcontexts/libfcitxplatforminputcontextplugin.a
+INCLUDEPATH += "/usr/include/libappindicator3-0.1"
+INCLUDEPATH += "/usr/include/libdbusmenu-glib-0.4"
+INCLUDEPATH += "/usr/include/gtk-3.0"
+INCLUDEPATH += "/usr/include/at-spi2-atk/2.0"
+INCLUDEPATH += "/usr/include/at-spi-2.0"
+INCLUDEPATH += "/usr/include/dbus-1.0"
+INCLUDEPATH += "/usr/lib64/dbus-1.0/include"
+INCLUDEPATH += "/usr/include/gtk-3.0"
+INCLUDEPATH += "/usr/include/gio-unix-2.0/"
+INCLUDEPATH += "/usr/include/cairo"
+INCLUDEPATH += "/usr/include/minizip"
+INCLUDEPATH += "/usr/include/opus"
+INCLUDEPATH += "/usr/include/gtk-2.0"
+INCLUDEPATH += "/usr/lib64/gtk-2.0/include"
+INCLUDEPATH += "/usr/include/pango-1.0"
+INCLUDEPATH += "/usr/include/atk-1.0"
+INCLUDEPATH += "/usr/include/cairo"
+INCLUDEPATH += "/usr/include/pixman-1"
+INCLUDEPATH += "/usr/include/libdrm"
+INCLUDEPATH += "/usr/include/gdk-pixbuf-2.0"
+INCLUDEPATH += "/usr/include/libpng16"
+INCLUDEPATH += "/usr/include/pango-1.0"
+INCLUDEPATH += "/usr/include/harfbuzz"
+INCLUDEPATH += "/usr/include/pango-1.0"
+INCLUDEPATH += "/usr/include/glib-2.0"
+INCLUDEPATH += "/usr/lib64/glib-2.0/include"
+INCLUDEPATH += "/usr/include/freetype2"
+
+DEFINES += TDESKTOP_DISABLE_AUTOUPDATE
+DEFINES += TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
+DEFINES += TDESKTOP_DISABLE_CRASH_REPORTS
