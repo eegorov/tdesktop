@@ -109,7 +109,7 @@ inline bool _lngEquals(const QByteArray &key, int from, int len, const char *val
 #define LNG_EQUALS_TAIL(key, from, value) _lngEquals(key, from, key.size() - from, value, sizeof(value) - 1)
 #define LNG_EQUALS(key, value) _lngEquals(key, 0, key.size(), value, sizeof(value) - 1)
 
-static const int MaxCountedValues = 6;
+static const int MaxCountedValues = 7;
 
 void readKeyValue(const char *&from, const char *end) {
 	if (!skipJunk(from, end)) return;
