@@ -40,11 +40,16 @@ set "SolutionPath=%HomePath%\.."
 set "UpdateFile=tupdate%AppVersion%"
 set "SetupFile=tsetup.%AppVersionStrFull%.exe"
 set "PortableFile=tportable.%AppVersionStrFull%.zip"
-set "ReleasePath=%HomePath%\..\Win32\Deploy"
+set "ReleasePath=%HomePath%\..\out\Release"
 set "DeployPath=%ReleasePath%\deploy\%AppVersionStrMajor%\%AppVersionStrFull%"
 set "SignPath=%HomePath%\..\..\TelegramPrivate\Sign.bat"
 set "BinaryName=Telegram"
 set "DropboxSymbolsPath=X:\Telegram\symbols"
+
+if not exist %DropboxSymbolsPath% (
+  echo Dropbox path not found!
+  exit /b 1
+)
 
 if %BetaVersion% neq 0 (
   if exist %DeployPath%\ (
@@ -73,16 +78,13 @@ if %BetaVersion% neq 0 (
     exit /b 1
   )
 )
-cd "%ResourcesPath%"
-if "%1" == "fast" (
-  echo Skipping touching of telegram.qrc...
-) else (
-  copy telegram.qrc /B+,,/Y
-)
+
+cd "%HomePath%"
+call gyp\refresh.bat
 if %errorlevel% neq 0 goto error
 
 cd "%SolutionPath%"
-MSBuild Telegram.sln /property:Configuration=Deploy
+call ninja -C out/Release Telegram
 if %errorlevel% neq 0 goto error
 
 echo .
@@ -90,7 +92,7 @@ echo Version %AppVersionStrFull% build successfull. Preparing..
 echo .
 
 echo Dumping debug symbols..
-call "%SolutionPath%\..\Libraries\breakpad\src\tools\windows\binaries\dump_syms.exe" "%ReleasePath%\%BinaryName%.pdb" > "%ReleasePath%\%BinaryName%.sym"
+call "%SolutionPath%\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe" "%ReleasePath%\%BinaryName%.exe.pdb" > "%ReleasePath%\%BinaryName%.exe.sym"
 echo Done!
 
 set "PATH=%PATH%;C:\Program Files\7-Zip;C:\Program Files (x86)\Inno Setup 5"
@@ -103,8 +105,9 @@ call "%SignPath%" "Updater.exe"
 if %errorlevel% neq 0 goto error
 
 if %BetaVersion% equ 0 (
-  iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "%FullScriptPath%setup.iss"
+  iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "%FullScriptPath%setup.iss"
   if %errorlevel% neq 0 goto error
+  if not exist "tsetup.%AppVersionStrFull%.exe" goto error
 
   call "%SignPath%" "tsetup.%AppVersionStrFull%.exe"
   if %errorlevel% neq 0 goto error
@@ -130,29 +133,31 @@ if %BetaVersion% neq 0 (
 
 for /f ^"usebackq^ eol^=^
 
-^ delims^=^" %%a in (%ReleasePath%\%BinaryName%.sym) do (
+^ delims^=^" %%a in (%ReleasePath%\%BinaryName%.exe.sym) do (
   set "SymbolsHashLine=%%a"
   goto symbolslinedone
 )
 :symbolslinedone
 FOR /F "tokens=1,2,3,4* delims= " %%i in ("%SymbolsHashLine%") do set "SymbolsHash=%%l"
 
-echo Copying %BinaryName%.sym to %DropboxSymbolsPath%\%BinaryName%.pdb\%SymbolsHash%
-if not exist %DropboxSymbolsPath%\%BinaryName%.pdb mkdir %DropboxSymbolsPath%\%BinaryName%.pdb
-if not exist %DropboxSymbolsPath%\%BinaryName%.pdb\%SymbolsHash% mkdir %DropboxSymbolsPath%\%BinaryName%.pdb\%SymbolsHash%
-xcopy "%ReleasePath%\%BinaryName%.sym" %DropboxSymbolsPath%\%BinaryName%.pdb\%SymbolsHash%\
+echo Copying %BinaryName%.exe.sym to %DropboxSymbolsPath%\%BinaryName%.exe.pdb\%SymbolsHash%
+if not exist %DropboxSymbolsPath%\%BinaryName%.exe.pdb mkdir %DropboxSymbolsPath%\%BinaryName%.exe.pdb
+if not exist %DropboxSymbolsPath%\%BinaryName%.exe.pdb\%SymbolsHash% mkdir %DropboxSymbolsPath%\%BinaryName%.exe.pdb\%SymbolsHash%
+xcopy "%ReleasePath%\%BinaryName%.exe.sym" %DropboxSymbolsPath%\%BinaryName%.exe.pdb\%SymbolsHash%\
 echo Done!
 
 if not exist "%ReleasePath%\deploy" mkdir "%ReleasePath%\deploy"
 if not exist "%ReleasePath%\deploy\%AppVersionStrMajor%" mkdir "%ReleasePath%\deploy\%AppVersionStrMajor%"
 mkdir "%DeployPath%"
-mkdir "%DeployPath%\Telegram"
+mkdir "%DeployPath%\%BinaryName%"
 if %errorlevel% neq 0 goto error
 
-move "%ReleasePath%\Telegram.exe" "%DeployPath%\Telegram\"
+move "%ReleasePath%\%BinaryName%.exe" "%DeployPath%\%BinaryName%\"
 move "%ReleasePath%\Updater.exe" "%DeployPath%\"
-move "%ReleasePath%\Telegram.pdb" "%DeployPath%\"
-move "%ReleasePath%\Updater.pdb" "%DeployPath%\"
+xcopy "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
+xcopy "%ReleasePath%\Updater.pdb" "%DeployPath%\"
+move "%ReleasePath%\%BinaryName%.exe.pdb" "%DeployPath%\"
+move "%ReleasePath%\Updater.exe.pdb" "%DeployPath%\"
 if %BetaVersion% equ 0 (
   move "%ReleasePath%\%SetupFile%" "%DeployPath%\"
 ) else (
@@ -162,7 +167,7 @@ move "%ReleasePath%\%UpdateFile%" "%DeployPath%\"
 if %errorlevel% neq 0 goto error
 
 cd "%DeployPath%"
-7z a -mx9 %PortableFile% Telegram\
+7z a -mx9 %PortableFile% %BinaryName%\
 if %errorlevel% neq 0 goto error
 
 echo .
@@ -178,8 +183,10 @@ if %BetaVersion% equ 0 (
   if not exist "%DeployPath%\%SetupFile%" goto error
 )
 if not exist "%DeployPath%\%BinaryName%.pdb" goto error
+if not exist "%DeployPath%\%BinaryName%.exe.pdb" goto error
 if not exist "%DeployPath%\Updater.exe" goto error
 if not exist "%DeployPath%\Updater.pdb" goto error
+if not exist "%DeployPath%\Updater.exe.pdb" goto error
 if not exist "%FinalReleasePath%\%AppVersionStrMajor%" mkdir "%FinalReleasePath%\%AppVersionStrMajor%"
 if not exist "%FinalDeployPath%" mkdir "%FinalDeployPath%"
 
@@ -191,8 +198,10 @@ if %BetaVersion% equ 0 (
   xcopy "%DeployPath%\%BetaKeyFile%" "%FinalDeployPath%\" /Y
 )
 xcopy "%DeployPath%\%BinaryName%.pdb" "%FinalDeployPath%\"
+xcopy "%DeployPath%\%BinaryName%.exe.pdb" "%FinalDeployPath%\"
 xcopy "%DeployPath%\Updater.exe" "%FinalDeployPath%\"
 xcopy "%DeployPath%\Updater.pdb" "%FinalDeployPath%\"
+xcopy "%DeployPath%\Updater.exe.pdb" "%FinalDeployPath%\"
 
 echo Version %AppVersionStrFull% is ready!
 

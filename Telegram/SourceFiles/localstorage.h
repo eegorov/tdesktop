@@ -116,10 +116,11 @@ namespace Local {
 		TextWithTags textWithTags;
 		bool previewCancelled;
 	};
-	void writeDrafts(const PeerId &peer, const MessageDraft &msgDraft, const MessageDraft &editDraft);
+	void writeDrafts(const PeerId &peer, const MessageDraft &localDraft, const MessageDraft &editDraft);
 	void readDraftsWithCursors(History *h);
-	void writeDraftCursors(const PeerId &peer, const MessageCursor &msgCursor, const MessageCursor &editCursor);
+	void writeDraftCursors(const PeerId &peer, const MessageCursor &localCursor, const MessageCursor &editCursor);
 	bool hasDraftCursors(const PeerId &peer);
+	bool hasDraft(const PeerId &peer);
 
 	void writeFileLocation(MediaKey location, const FileLocation &local);
 	FileLocation readFileLocation(MediaKey location, bool check = true);
@@ -152,9 +153,17 @@ namespace Local {
 
 	void cancelTask(TaskId id);
 
-	void writeStickers();
-	void readStickers();
-	int32 countStickersHash(bool checkOfficial = false);
+	void writeInstalledStickers();
+	void writeFeaturedStickers();
+	void writeRecentStickers();
+	void writeArchivedStickers();
+	void readInstalledStickers();
+	void readFeaturedStickers();
+	void readRecentStickers();
+	void readArchivedStickers();
+	int32 countStickersHash(bool checkOutdatedInfo = false);
+	int32 countRecentStickersHash();
+	int32 countFeaturedStickersHash();
 
 	void writeSavedGifs();
 	void readSavedGifs();

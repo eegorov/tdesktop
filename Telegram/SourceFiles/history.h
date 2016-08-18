@@ -44,11 +44,11 @@ public:
 	Histories() : _a_typings(animation(this, &Histories::step_typings)), _unreadFull(0), _unreadMuted(0) {
 	}
 
-	void regSendAction(History *history, UserData *user, const MTPSendMessageAction &action);
+	void regSendAction(History *history, UserData *user, const MTPSendMessageAction &action, TimeId when);
 	void step_typings(uint64 ms, bool timer);
 
 	History *find(const PeerId &peerId);
-	History *findOrInsert(const PeerId &peerId, int32 unreadCount, int32 maxInboxRead);
+	History *findOrInsert(const PeerId &peerId, int32 unreadCount, int32 maxInboxRead, int32 maxOutboxRead);
 
 	void clear();
 	void remove(const PeerId &peer);
@@ -114,6 +114,7 @@ enum MediaOverviewType {
 	OverviewFiles      = 3,
 	OverviewVoiceFiles = 4,
 	OverviewLinks      = 5,
+	OverviewChatPhotos = 6,
 
 	OverviewCount
 };
@@ -126,6 +127,7 @@ inline MTPMessagesFilter typeToMediaFilter(MediaOverviewType &type) {
 	case OverviewFiles: return MTP_inputMessagesFilterDocument();
 	case OverviewVoiceFiles: return MTP_inputMessagesFilterVoice();
 	case OverviewLinks: return MTP_inputMessagesFilterUrl();
+	case OverviewChatPhotos: return MTP_inputMessagesFilterChatPhotos();
 	case OverviewCount: break;
 	default: type = OverviewCount; break;
 	}
@@ -152,41 +154,10 @@ struct SendAction {
 };
 
 using TextWithTags = FlatTextarea::TextWithTags;
-struct HistoryDraft {
-	HistoryDraft() : msgId(0), previewCancelled(false) {
-	}
-	HistoryDraft(const TextWithTags &textWithTags, MsgId msgId, const MessageCursor &cursor, bool previewCancelled)
-		: textWithTags(textWithTags)
-		, msgId(msgId)
-		, cursor(cursor)
-		, previewCancelled(previewCancelled) {
-	}
-	HistoryDraft(const FlatTextarea &field, MsgId msgId, bool previewCancelled)
-		: textWithTags(field.getTextWithTags())
-		, msgId(msgId)
-		, cursor(field)
-		, previewCancelled(previewCancelled) {
-	}
-	TextWithTags textWithTags;
-	MsgId msgId; // replyToId for message draft, editMsgId for edit draft
-	MessageCursor cursor;
-	bool previewCancelled;
-};
-struct HistoryEditDraft : public HistoryDraft {
-	HistoryEditDraft()
-		: HistoryDraft()
-		, saveRequest(0) {
-	}
-	HistoryEditDraft(const TextWithTags &textWithTags, MsgId msgId, const MessageCursor &cursor, bool previewCancelled, mtpRequestId saveRequest = 0)
-		: HistoryDraft(textWithTags, msgId, cursor, previewCancelled)
-		, saveRequest(saveRequest) {
-	}
-	HistoryEditDraft(const FlatTextarea &field, MsgId msgId, bool previewCancelled, mtpRequestId saveRequest = 0)
-		: HistoryDraft(field, msgId, previewCancelled)
-		, saveRequest(saveRequest) {
-	}
-	mtpRequestId saveRequest;
-};
+
+namespace Data {
+struct Draft;
+} // namespace Data
 
 class HistoryMedia;
 class HistoryMessage;
@@ -225,6 +196,8 @@ public:
 	bool isEmpty() const {
 		return blocks.isEmpty();
 	}
+	bool isDisplayedEmpty() const;
+
 	void clear(bool leaveItems = false);
 
 	virtual ~History();
@@ -236,8 +209,8 @@ public:
 	HistoryItem *addNewDocument(MsgId id, MTPDmessage::Flags flags, int32 viaBotId, MsgId replyTo, QDateTime date, int32 from, DocumentData *doc, const QString &caption, const MTPReplyMarkup &markup);
 	HistoryItem *addNewPhoto(MsgId id, MTPDmessage::Flags flags, int32 viaBotId, MsgId replyTo, QDateTime date, int32 from, PhotoData *photo, const QString &caption, const MTPReplyMarkup &markup);
 
-	void addOlderSlice(const QVector<MTPMessage> &slice, const QVector<MTPMessageGroup> *collapsed);
-	void addNewerSlice(const QVector<MTPMessage> &slice, const QVector<MTPMessageGroup> *collapsed);
+	void addOlderSlice(const QVector<MTPMessage> &slice);
+	void addNewerSlice(const QVector<MTPMessage> &slice);
 	bool addToOverview(MediaOverviewType type, MsgId msgId, AddToOverviewMethod method);
 	void eraseFromOverview(MediaOverviewType type, MsgId msgId);
 
@@ -269,12 +242,14 @@ public:
 	bool loadedAtBottom() const; // last message is in the list
 	void setNotLoadedAtBottom();
 	bool loadedAtTop() const; // nothing was added after loading history back
-	bool isReadyFor(MsgId msgId, MsgId &fixInScrollMsgId, int32 &fixInScrollMsgTop); // has messages for showing history at msgId
-	void getReadyFor(MsgId msgId, MsgId &fixInScrollMsgId, int32 &fixInScrollMsgTop);
+	bool isReadyFor(MsgId msgId); // has messages for showing history at msgId
+	void getReadyFor(MsgId msgId);
 
 	void setLastMessage(HistoryItem *msg);
 	void fixLastMessage(bool wasAtBottom);
 
+	bool needUpdateInChatList() const;
+	void updateChatListSortPosition();
 	void setChatsListDate(const QDateTime &date);
 	uint64 sortKeyInChatList() const {
 		return _sortKeyInChatList;
@@ -363,35 +338,27 @@ public:
 	typedef QList<HistoryItem*> NotifyQueue;
 	NotifyQueue notifies;
 
-	HistoryDraft *msgDraft() {
-		return _msgDraft.get();
+	Data::Draft *localDraft() {
+		return _localDraft.get();
 	}
-	HistoryEditDraft *editDraft() {
+	Data::Draft *cloudDraft() {
+		return _cloudDraft.get();
+	}
+	Data::Draft *editDraft() {
 		return _editDraft.get();
 	}
-	void setMsgDraft(std_::unique_ptr<HistoryDraft> &&draft) {
-		_msgDraft = std_::move(draft);
-	}
-	void takeMsgDraft(History *from) {
-		if (auto &draft = from->_msgDraft) {
-			if (!draft->textWithTags.text.isEmpty() && !_msgDraft) {
-				_msgDraft = std_::move(draft);
-				_msgDraft->msgId = 0; // edit and reply to drafts can't migrate
-			}
-			from->clearMsgDraft();
-		}
-	}
-	void setEditDraft(std_::unique_ptr<HistoryEditDraft> &&draft) {
-		_editDraft = std_::move(draft);
-	}
-	void clearMsgDraft() {
-		_msgDraft = nullptr;
-	}
-	void clearEditDraft() {
-		_editDraft = nullptr;
-	}
-	HistoryDraft *draft() {
-		return _editDraft ? editDraft() : msgDraft();
+	void setLocalDraft(std_::unique_ptr<Data::Draft> &&draft);
+	void takeLocalDraft(History *from);
+	void createLocalDraftFromCloud();
+	void setCloudDraft(std_::unique_ptr<Data::Draft> &&draft);
+	Data::Draft *createCloudDraft(Data::Draft *fromDraft);
+	void setEditDraft(std_::unique_ptr<Data::Draft> &&draft);
+	void clearLocalDraft();
+	void clearCloudDraft();
+	void clearEditDraft();
+	void draftSavedToCloud();
+	Data::Draft *draft() {
+		return _editDraft ? editDraft() : localDraft();
 	}
 
 	// some fields below are a property of a currently displayed instance of this
@@ -435,14 +402,14 @@ public:
 	mtpRequestId sendRequestId = 0;
 
 	mutable const HistoryItem *textCachedFor = nullptr; // cache
-	mutable Text lastItemTextCache = Text{ int(st::dlgRichMinWidth) };
+	mutable Text lastItemTextCache;
 
 	typedef QMap<UserData*, uint64> TypingUsers;
 	TypingUsers typing;
 	typedef QMap<UserData*, SendAction> SendActionUsers;
 	SendActionUsers sendActions;
 	QString typingStr;
-	Text typingText = Text{ int(st::dlgRichMinWidth) };
+	Text typingText;
 	uint32 typingDots;
 	QMap<SendActionType, uint64> mySendActions;
 
@@ -481,6 +448,8 @@ public:
 
 	void changeMsgId(MsgId oldId, MsgId newId);
 
+	Text cloudDraftTextCache;
+
 protected:
 
 	void clearOnDestroy();
@@ -507,14 +476,6 @@ protected:
 	// depending on if we are in isBuildingFronBlock() state.
 	// The last block is created on the go if it is needed.
 
-	// If the previous item is a message group the new group is
-	// not created but is just united with the previous one.
-	// create(HistoryItem *previous) should return a new HistoryGroup*
-	// unite(HistoryGroup *existing) should unite a new group with an existing
-	template <typename CreateGroup, typename UniteGroup>
-	void addMessageGroup(CreateGroup create, UniteGroup unite);
-	void addMessageGroup(const MTPDmessageGroup &group);
-
 	// Adds the item to the back or front block, depending on
 	// isBuildingFrontBlock(), creating the block if necessary.
 	void addItemToBlock(HistoryItem *item);
@@ -532,6 +493,9 @@ private:
 
 	// After adding a new history slice check the lastMsg and newLoaded.
 	void checkLastMsg();
+
+	// Add all items to the media overview if we were not loaded at bottom and now are.
+	void checkAddAllToOverview();
 
 	enum class Flag {
 		f_has_pending_resized_items = (1 << 0),
@@ -582,13 +546,11 @@ private:
 	// Depending on isBuildingFrontBlock() gets front or back block.
 	HistoryBlock *prepareBlockForAddingItem();
 
-	std_::unique_ptr<HistoryDraft> _msgDraft;
-	std_::unique_ptr<HistoryEditDraft> _editDraft;
+	std_::unique_ptr<Data::Draft> _localDraft, _cloudDraft;
+	std_::unique_ptr<Data::Draft> _editDraft;
 
  };
 
-class HistoryGroup;
-class HistoryCollapse;
 class HistoryJoined;
 class ChannelHistory : public History {
 public:
@@ -596,32 +558,9 @@ public:
 	ChannelHistory(const PeerId &peer);
 
 	void messageDetached(HistoryItem *msg);
-	void messageDeleted(HistoryItem *msg);
-	void messageWithIdDeleted(MsgId msgId);
 
-	bool isSwitchReadyFor(MsgId switchId, MsgId &fixInScrollMsgId, int32 &fixInScrollMsgTop); // has messages for showing history after switching mode at switchId
-	void getSwitchReadyFor(MsgId switchId, MsgId &fixInScrollMsgId, int32 &fixInScrollMsgTop);
-
-	void insertCollapseItem(MsgId wasMinId);
 	void getRangeDifference();
 	void getRangeDifferenceNext(int32 pts);
-
-	void addNewGroup(const MTPMessageGroup &group);
-
-	int32 unreadCountAll;
-	bool onlyImportant() const {
-		return _onlyImportant;
-	}
-
-	HistoryCollapse *collapse() const {
-		return _collapseMessage;
-	}
-
-	void clearOther() {
-		_otherNewLoaded = true;
-		_otherOldLoaded = false;
-		_otherList.clear();
-	}
 
 	HistoryJoined *insertJoinedMessage(bool unread);
 	void checkJoinedMessage(bool createUnread = false);
@@ -634,27 +573,15 @@ private:
 	friend class History;
 	HistoryItem* addNewChannelMessage(const MTPMessage &msg, NewMessageType type);
 	HistoryItem *addNewToBlocks(const MTPMessage &msg, NewMessageType type);
-	void addNewToOther(HistoryItem *item, NewMessageType type);
 
 	void checkMaxReadMessageDate();
 
-	HistoryGroup *findGroup(MsgId msgId) const;
-	HistoryBlock *findGroupBlock(MsgId msgId) const;
-	HistoryGroup *findGroupInOther(MsgId msgId) const;
 	HistoryItem *findPrevItem(HistoryItem *item) const;
-	void switchMode();
 
 	void cleared(bool leaveItems);
 
-	bool _onlyImportant;
-
 	QDateTime _maxReadMessageDate;
 
-	typedef QList<HistoryItem*> OtherList;
-	OtherList _otherList;
-	bool _otherOldLoaded, _otherNewLoaded;
-
-	HistoryCollapse *_collapseMessage;
 	HistoryJoined *_joinedMessage;
 
 	MsgId _rangeDifferenceFromId, _rangeDifferenceToId;
@@ -684,10 +611,15 @@ public:
 	int32 y, height;
 	History *history;
 
-	HistoryBlock *previous() const {
+	HistoryBlock *previousBlock() const {
 		t_assert(_indexInHistory >= 0);
 
 		return (_indexInHistory > 0) ? history->blocks.at(_indexInHistory - 1) : nullptr;
+	}
+	HistoryBlock *nextBlock() const {
+		t_assert(_indexInHistory >= 0);
+
+		return (_indexInHistory + 1 < history->blocks.size()) ? history->blocks.at(_indexInHistory + 1) : nullptr;
 	}
 	void setIndexInHistory(int index) {
 		_indexInHistory = index;
@@ -776,14 +708,8 @@ enum InfoDisplayType {
 	InfoDisplayOverBackground,
 };
 
-inline bool isImportantChannelMessage(MsgId id, MTPDmessage::Flags flags) { // client-side important msgs always has_views or has_from_id
-	return (flags & MTPDmessage::Flag::f_out) || (flags & MTPDmessage::Flag::f_mentioned) || (flags & MTPDmessage::Flag::f_post);
-}
-
 enum HistoryItemType {
 	HistoryItemMsg = 0,
-	HistoryItemGroup,
-	HistoryItemCollapse,
 	HistoryItemJoined
 };
 
@@ -849,7 +775,7 @@ struct HistoryMessageReply : public BaseComponent<HistoryMessageReply> {
 	bool updateData(HistoryMessage *holder, bool force = false);
 	void clearData(HistoryMessage *holder); // must be called before destructor
 
-	void checkNameUpdate() const;
+	bool isNameUpdated() const;
 	void updateName() const;
 	void resize(int width) const;
 	void itemRemoved(HistoryMessage *holder, HistoryItem *removed);
@@ -982,6 +908,7 @@ public:
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed);
 
 	void clearSelection();
+	void updateMessageId();
 
 private:
 	const HistoryItem *_item;
@@ -1149,7 +1076,7 @@ public:
 	const HistoryBlock *block() const {
 		return _block;
 	}
-	virtual void destroy();
+	void destroy();
 	void detach();
 	void detachFast();
 	bool detached() const {
@@ -1186,16 +1113,7 @@ public:
 	bool out() const {
 		return _flags & MTPDmessage::Flag::f_out;
 	}
-	bool unread() const {
-		if (out() && id > 0 && id < _history->outboxReadBefore) return false;
-		if (!out() && id > 0) {
-			if (id < _history->inboxReadBefore) return false;
-			if (channelId() != NoChannel) return true; // no unread flag for incoming messages in channels
-		}
-		if (history()->peer->isSelf()) return false; // messages from myself are always read
-		if (out() && history()->peer->migrateTo()) return false; // outgoing messages in converted chats are always read
-		return (_flags & MTPDmessage::Flag::f_unread);
-	}
+	bool unread() const;
 	bool mentionsMe() const {
 		return _flags & MTPDmessage::Flag::f_mentioned;
 	}
@@ -1242,9 +1160,6 @@ public:
 	bool isPost() const {
 		return _flags & MTPDmessage::Flag::f_post;
 	}
-	bool isImportant() const {
-		return _history->isChannel() && isImportantChannelMessage(id, _flags);
-	}
 	bool indexInOverview() const {
 		return (id > 0) && (!history()->isChannel() || history()->isMegagroup() || isPost());
 	}
@@ -1283,10 +1198,14 @@ public:
 	}
 	virtual void applyEdition(const MTPDmessage &message) {
 	}
+	virtual void applyEditionToEmpty() {
+	}
 	virtual void updateMedia(const MTPMessageMedia *media) {
 	}
 	virtual int32 addToOverview(AddToOverviewMethod method) {
 		return 0;
+	}
+	virtual void eraseFromOverview() {
 	}
 	virtual bool hasBubble() const {
 		return false;
@@ -1296,11 +1215,17 @@ public:
 	virtual TextWithEntities selectedText(TextSelection selection) const {
 		return { qsl("[-]"), EntitiesInText() };
 	}
-	virtual QString inDialogsText() const {
-		return qsl("-");
+
+	virtual QString notificationHeader() const {
+		return QString();
 	}
+	virtual QString notificationText() const;
+
+	// Returns text with link-start and link-end commands for service-color highlighting.
+	// Example: "[link1-start]You:[link1-end] [link1-start]Photo,[link1-end] caption text"
+	virtual QString inDialogsText() const;
 	virtual QString inReplyText() const {
-		return inDialogsText();
+		return notificationText();
 	}
 	virtual TextWithEntities originalText() const {
 		return { QString(), EntitiesInText() };
@@ -1311,11 +1236,11 @@ public:
 	virtual void setViewsCount(int32 count) {
 	}
 	virtual void setId(MsgId newId);
-	virtual void drawInDialog(Painter &p, const QRect &r, bool act, const HistoryItem *&cacheFor, Text &cache) const = 0;
-    virtual QString notificationHeader() const {
-        return QString();
-    }
-    virtual QString notificationText() const = 0;
+	void drawInDialog(Painter &p, const QRect &r, bool act, const HistoryItem *&cacheFor, Text &cache) const;
+
+	bool emptyText() const {
+		return _text.isEmpty();
+	}
 
 	bool canDelete() const {
 		ChannelData *channel = _history->peer->asChannel();
@@ -1335,9 +1260,6 @@ public:
 	}
 
 	bool canEdit(const QDateTime &cur) const;
-	bool wasEdited() const {
-		return _flags & MTPDmessage::Flag::f_edit_date;
-	}
 
 	bool suggestBanReportDeleteAll() const {
 		ChannelData *channel = history()->peer->asChannel();
@@ -1363,8 +1285,8 @@ public:
 		return FullMsgId(channelId(), id);
 	}
 
-	virtual HistoryMedia *getMedia() const {
-		return nullptr;
+	HistoryMedia *getMedia() const {
+		return _media.data();
 	}
 	virtual void setText(const TextWithEntities &textWithEntities) {
 	}
@@ -1481,8 +1403,19 @@ public:
 	bool isAttachedToPrevious() const {
 		return _flags & MTPDmessage_ClientFlag::f_attach_to_previous;
 	}
+	bool displayDate() const {
+		return Has<HistoryMessageDate>();
+	}
 
-	void clipCallback(ClipReaderNotification notification);
+	bool isInOneDayWithPrevious() const {
+		return !isEmpty() && !displayDate();
+	}
+
+	bool isEmpty() const {
+		return _text.isEmpty() && !_media;
+	}
+
+	void clipCallback(Media::Clip::Notification notification);
 
 	virtual ~HistoryItem();
 
@@ -1499,6 +1432,9 @@ protected:
 
 	virtual int resizeGetHeight_(int width) = 0;
 
+	void finishEdition(int oldKeyboardTop);
+	void finishEditionToEmpty();
+
 	PeerData *_from;
 	History *_history;
 	HistoryBlock *_block = nullptr;
@@ -1507,14 +1443,26 @@ protected:
 
 	mutable int32 _authorNameVersion;
 
-	HistoryItem *previous() const {
+	HistoryItem *previousItem() const {
 		if (_block && _indexInBlock >= 0) {
 			if (_indexInBlock > 0) {
 				return _block->items.at(_indexInBlock - 1);
 			}
-			if (HistoryBlock *previousBlock = _block->previous()) {
-				t_assert(!previousBlock->items.isEmpty());
-				return previousBlock->items.back();
+			if (auto previous = _block->previousBlock()) {
+				t_assert(!previous->items.isEmpty());
+				return previous->items.back();
+			}
+		}
+		return nullptr;
+	}
+	HistoryItem *nextItem() const {
+		if (_block && _indexInBlock >= 0) {
+			if (_indexInBlock + 1 < _block->items.size()) {
+				return _block->items.at(_indexInBlock + 1);
+			}
+			if (auto next = _block->nextBlock()) {
+				t_assert(!next->items.isEmpty());
+				return next->items.front();
 			}
 		}
 		return nullptr;
@@ -1523,12 +1471,7 @@ protected:
 	// this should be used only in previousItemChanged()
 	// to add required bits to the Composer mask
 	// after that always use Has<HistoryMessageDate>()
-	bool displayDate() const {
-		if (auto prev = previous()) {
-			return prev->date.date() != date.date();
-		}
-		return true;
-	}
+	void recountDisplayDate();
 
 	// this should be used only in previousItemChanged() or when
 	// HistoryMessageDate or HistoryMessageUnreadBar bit is changed in the Composer mask
@@ -1622,7 +1565,7 @@ protected:
 class RadialAnimation {
 public:
 
-	RadialAnimation(AnimationCreator creator);
+	RadialAnimation(AnimationCallbacks &&callbacks);
 
 	float64 opacity() const {
 		return _opacity;
@@ -1659,7 +1602,14 @@ public:
 	HistoryMedia &operator=(const HistoryMedia &other) = delete;
 
 	virtual HistoryMediaType type() const = 0;
-	virtual QString inDialogsText() const = 0;
+
+	virtual QString notificationText() const {
+		return QString();
+	}
+
+	// Returns text with link-start and link-end commands for service-color highlighting.
+	// Example: "[link1-start]You:[link1-end] [link1-start]Photo,[link1-end] caption text"
+	virtual QString inDialogsText() const;
 	virtual TextWithEntities selectedText(TextSelection selection) const = 0;
 
 	bool hasPoint(int x, int y) const {
@@ -1709,7 +1659,7 @@ public:
 	virtual DocumentData *getDocument() {
 		return nullptr;
 	}
-	virtual ClipReader *getClipReader() {
+	virtual Media::Clip::Reader *getClipReader() {
 		return nullptr;
 	}
 
@@ -1771,19 +1721,6 @@ protected:
 	int _width = 0;
 
 };
-
-inline MediaOverviewType mediaToOverviewType(HistoryMedia *media) {
-	switch (media->type()) {
-	case MediaTypePhoto: return OverviewPhotos;
-	case MediaTypeVideo: return OverviewVideos;
-	case MediaTypeFile: return OverviewFiles;
-	case MediaTypeMusicFile: return media->getDocument()->isMusic() ? OverviewMusicFiles : OverviewFiles;
-	case MediaTypeVoiceFile: return OverviewVoiceFiles;
-	case MediaTypeGif: return media->getDocument()->isGifv() ? OverviewCount : OverviewFiles;
-	default: break;
-	}
-	return OverviewCount;
-}
 
 class HistoryFileMedia : public HistoryMedia {
 public:
@@ -1856,9 +1793,9 @@ protected:
 	virtual bool dataLoaded() const = 0;
 
 	struct AnimationData {
-		AnimationData(AnimationCreator thumbOverCallbacks, AnimationCreator radialCallbacks) : a_thumbOver(0, 0)
-			, _a_thumbOver(thumbOverCallbacks)
-			, radial(radialCallbacks) {
+		AnimationData(AnimationCallbacks &&thumbOverCallbacks, AnimationCallbacks &&radialCallbacks) : a_thumbOver(0, 0)
+			, _a_thumbOver(std_::move(thumbOverCallbacks))
+			, radial(std_::move(radialCallbacks)) {
 		}
 		anim::fvalue a_thumbOver;
 		Animation _a_thumbOver;
@@ -1896,6 +1833,7 @@ public:
 		return !_caption.isEmpty();
 	}
 
+	QString notificationText() const override;
 	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
@@ -1976,6 +1914,7 @@ public:
 		return !_caption.isEmpty();
 	}
 
+	QString notificationText() const override;
 	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
@@ -2099,6 +2038,7 @@ public:
 		return Has<HistoryDocumentCaptioned>();
 	}
 
+	QString notificationText() const override;
 	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
@@ -2155,10 +2095,16 @@ protected:
 
 private:
 	void createComponents(bool caption);
-	DocumentData *_data;
 
 	void setStatusSize(int32 newSize, qint64 realDuration = 0) const;
 	bool updateStatusText() const; // returns showPause
+
+	// Callback is a void(const QString &, const QString &, const Text &) functor.
+	// It will be called as callback(attachType, attachFileName, attachCaption).
+	template <typename Callback>
+	void buildStringRepresentation(Callback callback) const;
+
+	DocumentData *_data;
 
 };
 
@@ -2186,6 +2132,7 @@ public:
 		return !_caption.isEmpty();
 	}
 
+	QString notificationText() const override;
 	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
@@ -2196,7 +2143,7 @@ public:
 	DocumentData *getDocument() override {
 		return _data;
 	}
-	ClipReader *getClipReader() override {
+	Media::Clip::Reader *getClipReader() override {
 		return gif();
 	}
 
@@ -2245,12 +2192,12 @@ private:
 	int32 _thumbw, _thumbh;
 	Text _caption;
 
-	ClipReader *_gif;
-	ClipReader *gif() {
-		return (_gif == BadClipReader) ? nullptr : _gif;
+	Media::Clip::Reader *_gif;
+	Media::Clip::Reader *gif() {
+		return (_gif == Media::Clip::BadReader) ? nullptr : _gif;
 	}
-	const ClipReader *gif() const {
-		return (_gif == BadClipReader) ? nullptr : _gif;
+	const Media::Clip::Reader *gif() const {
+		return (_gif == Media::Clip::BadReader) ? nullptr : _gif;
 	}
 
 	void setStatusSize(int32 newSize) const;
@@ -2284,7 +2231,7 @@ public:
 		return true;
 	}
 
-	QString inDialogsText() const override;
+	QString notificationText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
 	DocumentData *getDocument() override {
@@ -2309,6 +2256,7 @@ private:
 	int additionalWidth() const {
 		return additionalWidth(_parent->Get<HistoryMessageVia>(), _parent->Get<HistoryMessageReply>());
 	}
+	QString toString() const;
 
 	int16 _pixw, _pixh;
 	ClickHandlerPtr _packLink;
@@ -2353,7 +2301,7 @@ public:
 		return true;
 	}
 
-	QString inDialogsText() const override;
+	QString notificationText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
 	void attachToParent() override;
@@ -2421,7 +2369,6 @@ public:
 		return _attach && _attach->dragItemByHandler(p);
 	}
 
-	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
@@ -2433,7 +2380,7 @@ public:
 	DocumentData *getDocument() override {
 		return _attach ? _attach->getDocument() : 0;
 	}
-	ClipReader *getClipReader() override {
+	Media::Clip::Reader *getClipReader() override {
 		return _attach ? _attach->getClipReader() : 0;
 	}
 	bool playInline(bool autoplay) override {
@@ -2501,8 +2448,6 @@ struct LocationData;
 class LocationManager : public QObject {
 	Q_OBJECT
 public:
-	LocationManager() : manager(0), black(0) {
-	}
 	void init();
 	void reinit();
 	void deinit();
@@ -2520,10 +2465,10 @@ public slots:
 private:
 	void failed(LocationData *data);
 
-	QNetworkAccessManager *manager;
+	QNetworkAccessManager *manager = nullptr;
 	QMap<QNetworkReply*, LocationData*> dataLoadings, imageLoadings;
 	QMap<LocationData*, int32> serverRedirects;
-	ImagePtr *black;
+	ImagePtr *black = nullptr;
 };
 
 class HistoryLocation : public HistoryMedia {
@@ -2555,6 +2500,7 @@ public:
 		return p == _link;
 	}
 
+	QString notificationText() const override;
 	QString inDialogsText() const override;
 	TextWithEntities selectedText(TextSelection selection) const override;
 
@@ -2628,11 +2574,8 @@ public:
 	int32 plainMaxWidth() const;
 	void countPositionAndSize(int32 &left, int32 &width) const;
 
-	bool emptyText() const {
-		return _text.isEmpty();
-	}
 	bool drawBubble() const {
-		return _media ? (!emptyText() || _media->needsBubble()) : true;
+		return _media ? (!emptyText() || _media->needsBubble()) : !isEmpty();
 	}
 	bool hasBubble() const override {
 		return drawBubble();
@@ -2643,6 +2586,7 @@ public:
 
 		return (!emptyText() || !_media || !_media->isDisplayed() || Has<HistoryMessageReply>() || Has<HistoryMessageForwarded>() || viaBot() || !_media->hideFromName());
 	}
+	bool displayEditedBadge(bool hasViaBot) const;
 	bool uploading() const {
 		return _media && _media->uploading();
 	}
@@ -2653,8 +2597,6 @@ public:
 	void draw(Painter &p, const QRect &r, TextSelection selection, uint64 ms) const override;
 
 	void dependencyItemRemoved(HistoryItem *dependency) override;
-
-	void destroy() override;
 
 	bool hasPoint(int x, int y) const override;
 	bool pointInTime(int32 right, int32 bottom, int x, int y, InfoDisplayType type) const override;
@@ -2673,18 +2615,15 @@ public:
 		HistoryItem::clickHandlerPressedChanged(p, pressed);
 	}
 
-	void drawInDialog(Painter &p, const QRect &r, bool act, const HistoryItem *&cacheFor, Text &cache) const override;
     QString notificationHeader() const override;
-    QString notificationText() const override;
 
 	void applyEdition(const MTPDmessage &message) override;
+	void applyEditionToEmpty() override;
 	void updateMedia(const MTPMessageMedia *media) override;
 	int32 addToOverview(AddToOverviewMethod method) override;
-	void eraseFromOverview();
+	void eraseFromOverview() override;
 
 	TextWithEntities selectedText(TextSelection selection) const override;
-	QString inDialogsText() const override;
-	HistoryMedia *getMedia() const override;
 	void setText(const TextWithEntities &textWithEntities) override;
 	TextWithEntities originalText() const override;
 	bool textHasLinks() const override;
@@ -2754,6 +2693,8 @@ private:
 	HistoryMessage(History *history, MsgId msgId, MTPDmessage::Flags flags, MsgId replyTo, int32 viaBotId, QDateTime date, int32 from, PhotoData *photo, const QString &caption, const MTPReplyMarkup &markup); // local photo
 	friend class HistoryItemInstantiated<HistoryMessage>;
 
+	void setEmptyText();
+
 	void initDimensions() override;
 	int resizeGetHeight_(int width) override;
 	int performResizeGetHeight(int width);
@@ -2812,9 +2753,9 @@ inline MTPDmessage::Flags newMessageFlags(PeerData *p) {
 	MTPDmessage::Flags result = 0;
 	if (!p->isSelf()) {
 		result |= MTPDmessage::Flag::f_out;
-		if (p->isChat() || (p->isUser() && !p->asUser()->botInfo)) {
-			result |= MTPDmessage::Flag::f_unread;
-		}
+		//if (p->isChat() || (p->isUser() && !p->asUser()->botInfo)) {
+		//	result |= MTPDmessage::Flag::f_unread;
+		//}
 	}
 	return result;
 }
@@ -2825,9 +2766,12 @@ struct HistoryServicePinned : public BaseComponent<HistoryServicePinned> {
 	ClickHandlerPtr lnk;
 };
 
+namespace HistoryLayout {
+class ServiceMessagePainter;
+} // namespace HistoryLayout
+
 class HistoryService : public HistoryItem, private HistoryItemInstantiated<HistoryService> {
 public:
-
 	static HistoryService *create(History *history, const MTPDmessageService &msg) {
 		return _create(history, msg);
 	}
@@ -2870,8 +2814,10 @@ public:
 		HistoryItem::clickHandlerPressedChanged(p, pressed);
 	}
 
-	void drawInDialog(Painter &p, const QRect &r, bool act, const HistoryItem *&cacheFor, Text &cache) const override;
-    QString notificationText() const override;
+	void applyEditionToEmpty() override;
+
+	int32 addToOverview(AddToOverviewMethod method) override;
+	void eraseFromOverview() override;
 
 	bool needCheck() const override {
 		return false;
@@ -2883,13 +2829,12 @@ public:
 	QString inDialogsText() const override;
 	QString inReplyText() const override;
 
-	HistoryMedia *getMedia() const override;
-
 	void setServiceText(const QString &text);
 
 	~HistoryService();
 
 protected:
+	friend class HistoryLayout::ServiceMessagePainter;
 
 	HistoryService(History *history, const MTPDmessageService &msg);
 	HistoryService(History *history, MsgId msgId, QDateTime date, const QString &msg, MTPDmessage::Flags flags = 0, int32 from = 0);
@@ -2898,92 +2843,11 @@ protected:
 	void initDimensions() override;
 	int resizeGetHeight_(int width) override;
 
+	void removeMedia();
+
 	void setMessageByAction(const MTPmessageAction &action);
 	bool updatePinned(bool force = false);
 	bool updatePinnedText(const QString *pfrom = nullptr, QString *ptext = nullptr);
-
-};
-
-class HistoryGroup : public HistoryService, private HistoryItemInstantiated<HistoryGroup> {
-public:
-
-	static HistoryGroup *create(History *history, const MTPDmessageGroup &group, const QDateTime &date) {
-		return _create(history, group, date);
-	}
-	static HistoryGroup *create(History *history, HistoryItem *newItem, const QDateTime &date) {
-		return _create(history, newItem, date);
-	}
-
-	HistoryTextState getState(int x, int y, HistoryStateRequest request) const override;
-
-	TextWithEntities selectedText(TextSelection selection) const override {
-		return { QString(), EntitiesInText() };
-	}
-	HistoryItemType type() const override {
-		return HistoryItemGroup;
-	}
-	void uniteWith(MsgId minId, MsgId maxId, int32 count);
-	void uniteWith(HistoryItem *item) {
-		uniteWith(item->id - 1, item->id + 1, 1);
-	}
-	void uniteWith(HistoryGroup *other) {
-		uniteWith(other->_minId, other->_maxId, other->_count);
-	}
-
-	bool decrementCount(); // returns true if result count > 0
-
-	MsgId minId() const {
-		return _minId;
-	}
-	MsgId maxId() const {
-		return _maxId;
-	}
-
-protected:
-
-	HistoryGroup(History *history, const MTPDmessageGroup &group, const QDateTime &date);
-	HistoryGroup(History *history, HistoryItem *newItem, const QDateTime &date);
-	using HistoryItemInstantiated<HistoryGroup>::_create;
-	friend class HistoryItemInstantiated<HistoryGroup>;
-
-private:
-	MsgId _minId, _maxId;
-	int32 _count;
-
-	ClickHandlerPtr _lnk;
-
-	void updateText();
-
-};
-
-class HistoryCollapse : public HistoryService, private HistoryItemInstantiated<HistoryCollapse> {
-public:
-
-	static HistoryCollapse *create(History *history, MsgId wasMinId, const QDateTime &date) {
-		return _create(history, wasMinId, date);
-	}
-
-	void draw(Painter &p, const QRect &r, TextSelection selection, uint64 ms) const override;
-	HistoryTextState getState(int x, int y, HistoryStateRequest request) const override;
-
-	TextWithEntities selectedText(TextSelection selection) const override {
-		return { QString(), EntitiesInText() };
-	}
-	HistoryItemType type() const override {
-		return HistoryItemCollapse;
-	}
-	MsgId wasMinId() const {
-		return _wasMinId;
-	}
-
-protected:
-
-	HistoryCollapse(History *history, MsgId wasMinId, const QDateTime &date);
-	using HistoryItemInstantiated<HistoryCollapse>::_create;
-	friend class HistoryItemInstantiated<HistoryCollapse>;
-
-private:
-	MsgId _wasMinId;
 
 };
 

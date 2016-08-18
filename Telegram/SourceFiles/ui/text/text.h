@@ -53,10 +53,10 @@ struct TextParseOptions {
 };
 extern const TextParseOptions _defaultOptions, _textPlainOptions;
 
-enum TextSelectType {
-	TextSelectLetters    = 0x01,
-	TextSelectWords      = 0x02,
-	TextSelectParagraphs = 0x03,
+enum class TextSelectType {
+	Letters    = 0x01,
+	Words      = 0x02,
+	Paragraphs = 0x03,
 };
 
 struct TextSelection {
@@ -93,8 +93,9 @@ public:
 	Text &operator=(const Text &other);
 	Text &operator=(Text &&other);
 
-	int32 countWidth(int32 width) const;
-	int32 countHeight(int32 width) const;
+	int countWidth(int width) const;
+	int countHeight(int width) const;
+	void countLineWidths(int width, QVector<int> *lineWidths) const;
 	void setText(style::font font, const QString &text, const TextParseOptions &options = _defaultOptions);
 	void setRichText(style::font font, const QString &text, TextParseOptions options = _defaultOptions, const TextCustomTagsMap &custom = TextCustomTagsMap());
 	void setMarkedText(style::font font, const TextWithEntities &textWithEntities, const TextParseOptions &options = _defaultOptions);
@@ -115,7 +116,7 @@ public:
 
 	void replaceFont(style::font f); // does not recount anything, use at your own risk!
 
-	void draw(QPainter &p, int32 left, int32 top, int32 width, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const;
+	void draw(QPainter &p, int32 left, int32 top, int32 width, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }, bool fullWidthSelection = true) const;
 	void drawElided(QPainter &p, int32 left, int32 top, int32 width, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const;
 	void drawLeft(QPainter &p, int32 left, int32 top, int32 width, int32 outerw, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }) const {
 		draw(p, rtl() ? (outerw - left - width) : left, top, width, align, yFrom, yTo, selection);
@@ -168,6 +169,9 @@ public:
 	}
 
 	TextSelection adjustSelection(TextSelection selection, TextSelectType selectType) const;
+	bool isFullSelection(TextSelection selection) const {
+		return (selection.from == 0) && (selection.to >= _text.size());
+	}
 
 	bool isEmpty() const {
 		return _text.isEmpty();
@@ -211,6 +215,12 @@ private:
 	// Template method for originalText(), originalTextWithEntities().
 	template <typename AppendPartCallback, typename ClickHandlerStartCallback, typename ClickHandlerFinishCallback, typename FlagsChangeCallback>
 	void enumerateText(TextSelection selection, AppendPartCallback appendPartCallback, ClickHandlerStartCallback clickHandlerStartCallback, ClickHandlerFinishCallback clickHandlerFinishCallback, FlagsChangeCallback flagsChangeCallback) const;
+
+	// Template method for countWidth(), countHeight(), countLineWidths().
+	// callback(lineWidth, lineHeight) will be called for all lines with:
+	// QFixed lineWidth, int lineHeight
+	template <typename Callback>
+	void enumerateLines(int w, Callback callback) const;
 
 	void recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir = Qt::LayoutDirectionAuto);
 
@@ -281,7 +291,7 @@ inline bool chIsSpace(QChar ch, bool rich = false) {
 	return ch.isSpace() || (ch < 32 && !(rich && ch == TextCommand)) || (ch == QChar::ParagraphSeparator) || (ch == QChar::LineSeparator) || (ch == QChar::ObjectReplacementCharacter) || (ch == QChar::CarriageReturn) || (ch == QChar::Tabulation);
 }
 inline bool chIsDiac(QChar ch) { // diac and variation selectors
-	return (ch.category() == QChar::Mark_NonSpacing) || (ch.unicode() == 1652);
+	return (ch.category() == QChar::Mark_NonSpacing) || (ch == 1652) || (ch >= 64606 && ch <= 64611);
 }
 inline bool chIsBad(QChar ch) {
 	return (ch == 0) || (ch >= 8232 && ch < 8237) || (ch >= 65024 && ch < 65040 && ch != 65039) || (ch >= 127 && ch < 160 && ch != 156) || (cPlatform() == dbipMac && ch >= 0x0B00 && ch <= 0x0B7F && chIsDiac(ch) && cIsElCapitan()); // tmp hack see https://bugreports.qt.io/browse/QTBUG-48910
@@ -392,13 +402,6 @@ inline bool chIsParagraphSeparator(QChar ch) {
 		break;
 	}
 	return false;
-}
-
-inline QString myUrlEncode(const QString &str) {
-	return QString::fromLatin1(QUrl::toPercentEncoding(str));
-}
-inline QString myUrlDecode(const QString &enc) {
-	return QUrl::fromPercentEncoding(enc.toUtf8());
 }
 
 void emojiDraw(QPainter &p, EmojiPtr e, int x, int y);

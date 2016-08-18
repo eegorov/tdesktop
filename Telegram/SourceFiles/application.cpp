@@ -27,9 +27,12 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "mainwidget.h"
 #include "lang.h"
 #include "boxes/confirmbox.h"
+#include "ui/filedialog.h"
 #include "langloaderplain.h"
 #include "localstorage.h"
 #include "autoupdater.h"
+#include "core/observer.h"
+#include "observer_peer.h"
 
 namespace {
 	void mtpStateChanged(int32 dc, int32 state) {
@@ -200,6 +203,7 @@ void Application::singleInstanceChecked() {
 		Logs::multipleInstances();
 	}
 
+	Notify::startObservers();
 	Sandbox::start();
 
 	if (!Logs::started() || (!cManyInstance() && !Logs::instanceChecked())) {
@@ -260,7 +264,7 @@ void Application::readClients() {
 					}
 				} else if (cmd.startsWith(qsl("OPEN:"))) {
 					if (cStartUrl().isEmpty()) {
-						startUrl = _escapeFrom7bit(cmds.mid(from + 5, to - from - 5));
+						startUrl = _escapeFrom7bit(cmds.mid(from + 5, to - from - 5)).mid(0, 8192);
 					}
 				} else {
 					LOG(("Application Error: unknown command %1 passed in local socket").arg(QString(cmd.constData(), cmd.length())));
@@ -336,6 +340,8 @@ void Application::closeApplication() {
 	if (_updateThread) _updateThread->quit();
 	_updateThread = 0;
 #endif
+
+	Notify::finishObservers();
 }
 
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
@@ -524,6 +530,12 @@ namespace Sandbox {
 	void installEventFilter(QObject *filter) {
 		if (Application *a = application()) {
 			a->installEventFilter(filter);
+		}
+	}
+
+	void removeEventFilter(QObject *filter) {
+		if (Application *a = application()) {
+			a->removeEventFilter(filter);
 		}
 	}
 
@@ -774,10 +786,6 @@ void AppClass::regPhotoUpdate(const PeerId &peer, const FullMsgId &msgId) {
 	photoUpdates.insert(msgId, peer);
 }
 
-void AppClass::clearPhotoUpdates() {
-	photoUpdates.clear();
-}
-
 bool AppClass::isPhotoUpdating(const PeerId &peer) {
 	for (QMap<FullMsgId, PeerId>::iterator i = photoUpdates.begin(), e = photoUpdates.end(); i != e; ++i) {
 		if (i.value() == peer) {
@@ -902,6 +910,18 @@ void AppClass::call_handleUnreadCounterUpdate() {
 	}
 }
 
+void AppClass::call_handleFileDialogQueue() {
+	while (true) {
+		if (!FileDialog::processQuery()) {
+			return;
+		}
+	}
+}
+
+void AppClass::call_handleDelayedPeerUpdates() {
+	Notify::peerUpdatedSendDelayed();
+}
+
 void AppClass::killDownloadSessions() {
 	uint64 ms = getms(), left = MTPAckSendWaiting + MTPKillFileSessionTimeout;
 	for (QMap<int32, uint64>::iterator i = killDownloadSessionTimes.begin(); i != killDownloadSessionTimes.end(); ) {
@@ -994,11 +1014,11 @@ void AppClass::uploadProfilePhoto(const QImage &tosend, const PeerId &peerId) {
 	PreparedPhotoThumbs photoThumbs;
 	QVector<MTPPhotoSize> photoSizes;
 
-	QPixmap thumb = QPixmap::fromImage(tosend.scaled(160, 160, Qt::KeepAspectRatio, Qt::SmoothTransformation), Qt::ColorOnly);
+	QPixmap thumb = App::pixmapFromImageInPlace(tosend.scaled(160, 160, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 	photoThumbs.insert('a', thumb);
 	photoSizes.push_back(MTP_photoSize(MTP_string("a"), MTP_fileLocationUnavailable(MTP_long(0), MTP_int(0), MTP_long(0)), MTP_int(thumb.width()), MTP_int(thumb.height()), MTP_int(0)));
 
-	QPixmap medium = QPixmap::fromImage(tosend.scaled(320, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation), Qt::ColorOnly);
+	QPixmap medium = App::pixmapFromImageInPlace(tosend.scaled(320, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 	photoThumbs.insert('b', medium);
 	photoSizes.push_back(MTP_photoSize(MTP_string("b"), MTP_fileLocationUnavailable(MTP_long(0), MTP_int(0), MTP_long(0)), MTP_int(medium.width()), MTP_int(medium.height()), MTP_int(0)));
 
@@ -1018,7 +1038,7 @@ void AppClass::uploadProfilePhoto(const QImage &tosend, const PeerId &peerId) {
 	int32 filesize = 0;
 	QByteArray data;
 
-	ReadyLocalMedia ready(PreparePhoto, file, filename, filesize, data, id, id, qsl("jpg"), peerId, photo, photoThumbs, MTP_documentEmpty(MTP_long(0)), jpeg, false, false, 0);
+	ReadyLocalMedia ready(PreparePhoto, file, filename, filesize, data, id, id, qsl("jpg"), peerId, photo, photoThumbs, MTP_documentEmpty(MTP_long(0)), jpeg, false, 0);
 
 	connect(App::uploader(), SIGNAL(photoReady(const FullMsgId&,bool,const MTPInputFile&)), App::app(), SLOT(photoUpdated(const FullMsgId&,bool,const MTPInputFile&)), Qt::UniqueConnection);
 
@@ -1031,10 +1051,9 @@ void AppClass::checkMapVersion() {
     if (Local::oldMapVersion() < AppVersion) {
 		if (Local::oldMapVersion()) {
 			QString versionFeatures;
-			if ((cAlphaVersion() || cBetaVersion()) && Local::oldMapVersion() < 9049) {
-//				versionFeatures = QString::fromUtf8("\xe2\x80\x94 Select and copy text in photo / video captions and web page previews\n\xe2\x80\x94 Media player shortcuts are enabled only when player is opened");
-				versionFeatures = langNewVersionText();
-			} else if (Local::oldMapVersion() < 9049) {
+			if ((cAlphaVersion() || cBetaVersion()) && Local::oldMapVersion() < 9058) {
+				versionFeatures = QString::fromUtf8("\xe2\x80\x94 Alpha version of an embedded video player");
+			} else if (Local::oldMapVersion() < 10000) {
 				versionFeatures = langNewVersionText();
 			} else {
 				versionFeatures = lang(lng_new_version_minor).trimmed();

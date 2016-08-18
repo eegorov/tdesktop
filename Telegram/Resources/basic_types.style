@@ -66,6 +66,8 @@ flatButton {
 	overFont: font;
 	duration: int;
 	cursor: cursor;
+
+	radius: pixels;
 }
 
 iconedButton {
@@ -202,7 +204,7 @@ countryInput {
 
 slider {
 	color: color;
-	thikness: pixels;
+	thickness: pixels;
 
 	width: pixels;
 	bar: sprite;
@@ -210,9 +212,11 @@ slider {
 
 flatLabel {
 	font: font;
-	minWidth: pixels;
+	margin: margins;
 	width: pixels;
 	align: align;
+	textFg: color;
+	maxHeight: pixels;
 }
 
 switcher {
@@ -242,6 +246,18 @@ dropdown {
 
 	duration: int;
 	width: pixels;
+}
+
+InnerDropdown {
+	padding: margins;
+	shadow: icon;
+	shadowShift: pixels;
+
+	duration: int;
+	width: pixels;
+
+	scrollMargin: margins;
+	scrollPadding: margins;
 }
 
 PopupMenu {
@@ -295,16 +311,24 @@ botKeyboardButton {
 	downTextTop: pixels;
 }
 
-BoxButton {
+RoundButton {
 	textFg: color;
 	textFgOver: color;
 	textBg: color; // rect of textBg with rounded rect of textBgOver upon it
 	textBgOver: color;
 
+	secondaryTextFg: color;
+	secondaryTextFgOver: color;
+	secondarySkip: pixels;
+
 	width: pixels;
 	height: pixels;
+	padding: margins;
 
 	textTop: pixels;
+	downTextTop: pixels;
+
+	icon: icon;
 
 	font: font;
 	duration: int;
@@ -324,7 +348,7 @@ Checkbox {
 	textPosition: point;
 	diameter: pixels;
 	thickness: pixels;
-	checkIcon: sprite;
+	checkIcon: icon;
 
 	font: font;
 	duration: int;
@@ -410,4 +434,33 @@ InputField {
 PeerAvatarButton {
 	size: pixels;
 	photoSize: pixels;
+}
+
+OutlineButton {
+	outlineWidth: pixels;
+	outlineFg: color;
+	outlineFgOver: color;
+
+	textBg: color;
+	textBgOver: color;
+
+	textFg: color;
+	textFgOver: color;
+
+	font: font;
+	padding: margins;
+}
+
+IconButton {
+	width: pixels;
+	height: pixels;
+
+	opacity: double;
+	overOpacity: double;
+
+	icon: icon;
+	iconPosition: point;
+	downIconPosition: point;
+
+	duration: int;
 }

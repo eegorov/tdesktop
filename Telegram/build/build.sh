@@ -4,6 +4,7 @@ pushd `dirname $0` > /dev/null
 FullScriptPath=`pwd`
 popd > /dev/null
 QMakePath="/usr/local/tdesktop/Qt-5.6.0/bin/qmake"
+QMakeArgs="INCLUDEPATH+=/usr/local/include INCLUDEPATH+=/usr/local/include/opus"
 
 if [ ! -d "$FullScriptPath/../../../TelegramPrivate" ]; then
   echo ""
@@ -136,7 +137,7 @@ if [ "$BuildTarget" == "linux" ] || [ "$BuildTarget" == "linux32" ]; then
 
   mkdir -p "$WorkPath/ReleaseIntermediate"
   cd "$WorkPath/ReleaseIntermediate"
-  "$QMakePath" "$HomePath/Telegram.pro" -r -spec linux-g++
+  "$QMakePath" $QMakeArgs "$HomePath/Telegram.pro" -r -spec linux-g++
 
   eval "$HomePath/build/makefile_static.sh"
   ./../codegen/Debug/codegen_style "-I./../../Telegram/Resources" "-I./../../Telegram/SourceFiles" "-o./GeneratedFiles/styles" all_files.style --rebuild
@@ -215,6 +216,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "mac32" ] || [ "$BuildTarg
 
   if [ "$FastParam" != "fast" ]; then
     touch "./Resources/telegram.qrc"
+    touch "./Telegram.plist"
   fi
   xcodebuild -project Telegram.xcodeproj -alltargets -configuration Release build
 

@@ -75,7 +75,7 @@ public:
 	// Returns false if there is a variable with such name already.
 	bool addVariable(const Variable &value);
 	// Returns nullptr if there is no such variable in result_ or any of included modules.
-	const Variable *findVariable(const FullName &name) const;
+	const Variable *findVariable(const FullName &name, bool *outFromThisModule = nullptr) const;
 	bool hasVariables() const {
 		return !variables_.isEmpty();
 	}
@@ -94,6 +94,9 @@ public:
 		return !fullpath_.isEmpty();
 	}
 
+	const Struct *findStructInModule(const FullName &name, const Module &module) const;
+	const Variable *findVariableInModule(const FullName &name, const Module &module) const;
+
 private:
 	QString fullpath_;
 	std::vector<std::unique_ptr<Module>> included_;
@@ -101,9 +104,6 @@ private:
 	QList<Variable> variables_;
 	QMap<QString, int> structsByName_;
 	QMap<QString, int> variablesByName_;
-
-	const Struct *findStructInModule(const FullName &name, const Module &module) const;
-	const Variable *findVariableInModule(const FullName &name, const Module &module) const;
 
 };
 

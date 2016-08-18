@@ -465,9 +465,9 @@ void FlatTextarea::insertTag(const QString &text, QString tagId) {
 					(i < 2 || !(fragmentText.at(i - 2).isLetterOrNumber() || fragmentText.at(i - 2) == '_'))) {
 					cursor.setPosition(fragmentPosition + i - 1);
 					int till = fragmentPosition + i;
-					for (; (till < fragmentEnd); ++till) {
+					for (; (till < fragmentEnd && till < pos); ++till) {
 						auto ch = fragmentText.at(till - fragmentPosition);
-						if (!ch.isLetterOrNumber() && ch != '_') {
+						if (!ch.isLetterOrNumber() && ch != '_' && ch != '@') {
 							break;
 						}
 					}
@@ -1337,6 +1337,15 @@ void FlatTextarea::keyPressEvent(QKeyEvent *e) {
 		}
 	} else if (e->key() == Qt::Key_Search || e == QKeySequence::Find) {
 		e->ignore();
+#ifdef Q_OS_MAC
+	} else if (e->key() == Qt::Key_E && e->modifiers().testFlag(Qt::ControlModifier)) {
+		auto cursor = textCursor();
+		int start = cursor.selectionStart(), end = cursor.selectionEnd();
+		if (end > start) {
+			TagList tags;
+			QApplication::clipboard()->setText(getTextPart(start, end, &tags), QClipboard::FindBuffer);
+		}
+#endif // Q_OS_MAC
 	} else {
 		QTextCursor tc(textCursor());
 		if (enter && ctrl) {

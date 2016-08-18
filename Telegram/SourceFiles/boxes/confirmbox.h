@@ -21,6 +21,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #pragma once
 
 #include "abstractbox.h"
+#include "ui/flatlabel.h"
 
 class InformBox;
 class ConfirmBox : public AbstractBox, public ClickHandlerHost {
@@ -28,7 +29,7 @@ class ConfirmBox : public AbstractBox, public ClickHandlerHost {
 
 public:
 
-	ConfirmBox(const QString &text, const QString &doneText = QString(), const style::BoxButton &doneStyle = st::defaultBoxButton, const QString &cancelText = QString(), const style::BoxButton &cancelStyle = st::cancelBoxButton);
+	ConfirmBox(const QString &text, const QString &doneText = QString(), const style::RoundButton &doneStyle = st::defaultBoxButton, const QString &cancelText = QString(), const style::RoundButton &cancelStyle = st::cancelBoxButton);
 	void keyPressEvent(QKeyEvent *e);
 	void paintEvent(QPaintEvent *e);
 	void resizeEvent(QResizeEvent *e);
@@ -60,7 +61,7 @@ protected:
 
 private:
 
-	ConfirmBox(const QString &text, const QString &doneText, const style::BoxButton &doneStyle, bool informative);
+	ConfirmBox(const QString &text, const QString &doneText, const style::RoundButton &doneStyle, bool informative);
 	friend class InformBox;
 
 	void init(const QString &text);
@@ -79,7 +80,7 @@ private:
 
 class InformBox : public ConfirmBox {
 public:
-	InformBox(const QString &text, const QString &doneText = QString(), const style::BoxButton &doneStyle = st::defaultBoxButton) : ConfirmBox(text, doneText, doneStyle, true) {
+	InformBox(const QString &text, const QString &doneText = QString(), const style::RoundButton &doneStyle = st::defaultBoxButton) : ConfirmBox(text, doneText, doneStyle, true) {
 	}
 };
 
@@ -216,7 +217,7 @@ private:
 
 	BoxButton _pin, _cancel;
 
-	mtpRequestId _requestId;
+	mtpRequestId _requestId = 0;
 
 };
 
@@ -248,5 +249,43 @@ private:
 	Checkbox _banUser, _reportSpam, _deleteAll;
 
 	BoxButton _delete, _cancel;
+
+};
+
+class KickMemberBox : public ConfirmBox {
+	Q_OBJECT
+
+public:
+	KickMemberBox(PeerData *chat, UserData *member);
+
+private slots:
+	void onConfirm();
+
+private:
+	PeerData *_chat;
+	UserData *_member;
+
+};
+
+class ConfirmInviteBox : public AbstractBox, public RPCSender {
+	Q_OBJECT
+
+public:
+	ConfirmInviteBox(const QString &title, const MTPChatPhoto &photo, int count, const QVector<UserData*> &participants);
+
+protected:
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+
+	void showAll() override;
+	void hideAll() override;
+
+private:
+	ChildWidget<FlatLabel> _title, _status;
+	ImagePtr _photo;
+	QVector<UserData*> _participants;
+
+	ChildWidget<BoxButton> _join, _cancel;
+	int _userWidth = 0;
 
 };

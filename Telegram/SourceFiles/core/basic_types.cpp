@@ -24,6 +24,11 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/engine.h>
+#include <openssl/conf.h>
+#include <openssl/ssl.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -44,7 +49,6 @@ uint64 _SharedMemoryLocation[4] = { 0x00, 0x01, 0x02, 0x03 };
 #include <openssl/rand.h>
 
 // Base types compile-time check
-
 static_assert(sizeof(char) == 1, "Basic types size check failed");
 static_assert(sizeof(uchar) == 1, "Basic types size check failed");
 static_assert(sizeof(int16) == 2, "Basic types size check failed");
@@ -131,9 +135,13 @@ TimeId fromServerTime(const MTPint &serverTime) {
 	return serverTime.v - unixtimeDelta;
 }
 
-MTPint toServerTime(const TimeId &clientTime) {
+void toServerTime(const TimeId &clientTime, MTPint &outServerTime) {
 	QReadLocker locker(&unixtimeLock);
-	return MTP_int(clientTime + unixtimeDelta);
+	outServerTime = MTP_int(clientTime + unixtimeDelta);
+}
+
+QDateTime dateFromServerTime(TimeId time) {
+	return dateFromServerTime(MTP_int(time));
 }
 
 // Precise timing functions / rand init
@@ -251,7 +259,7 @@ namespace {
 namespace ThirdParty {
 
 	void start() {
-		PlatformSpecific::ThirdParty::start();
+		Platform::ThirdParty::start();
 
 		if (!RAND_status()) { // should be always inited in all modern OS
 			char buf[16];
@@ -285,12 +293,21 @@ namespace ThirdParty {
 	}
 
 	void finish() {
-		av_lockmgr_register(0);
+		av_lockmgr_register(nullptr);
+
+		CRYPTO_cleanup_all_ex_data();
+		FIPS_mode_set(0);
+		ENGINE_cleanup();
+		CONF_modules_unload(1);
+		ERR_remove_state(0);
+		ERR_free_strings();
+		ERR_remove_thread_state(nullptr);
+		EVP_cleanup();
 
 		delete[] _sslLocks;
-		_sslLocks = 0;
+		_sslLocks = nullptr;
 
-		PlatformSpecific::ThirdParty::finish();
+		Platform::ThirdParty::finish();
 	}
 
 }

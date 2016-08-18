@@ -27,6 +27,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "apiwrap.h"
 #include "application.h"
 #include "core/click_handler_types.h"
+#include "styles/style_boxes.h"
 
 TextParseOptions _confirmBoxTextOptions = {
 	TextParseLinks | TextParseMultiline | TextParseRichText, // flags
@@ -35,7 +36,7 @@ TextParseOptions _confirmBoxTextOptions = {
 	Qt::LayoutDirectionAuto, // dir
 };
 
-ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style::BoxButton &doneStyle, const QString &cancelText, const style::BoxButton &cancelStyle) : AbstractBox(st::boxWidth)
+ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style::RoundButton &doneStyle, const QString &cancelText, const style::RoundButton &cancelStyle) : AbstractBox(st::boxWidth)
 , _informative(false)
 , _text(100)
 , _confirm(this, doneText.isEmpty() ? lang(lng_box_ok) : doneText, doneStyle)
@@ -43,7 +44,7 @@ ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style
 	init(text);
 }
 
-ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style::BoxButton &doneStyle, bool informative) : AbstractBox(st::boxWidth)
+ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style::RoundButton &doneStyle, bool informative) : AbstractBox(st::boxWidth)
 , _informative(true)
 , _text(100)
 , _confirm(this, doneText.isEmpty() ? lang(lng_box_ok) : doneText, doneStyle)
@@ -381,11 +382,10 @@ void ConvertToSupergroupBox::resizeEvent(QResizeEvent *e) {
 PinMessageBox::PinMessageBox(ChannelData *channel, MsgId msgId) : AbstractBox(st::boxWidth)
 , _channel(channel)
 , _msgId(msgId)
-, _text(this, lang(lng_pinned_pin_sure), st::boxLabel)
-, _notify(this, lang(lng_pinned_notify), true)
+, _text(this, lang(lng_pinned_pin_sure), FlatLabel::InitType::Simple, st::boxLabel)
+, _notify(this, lang(lng_pinned_notify), true, st::defaultBoxCheckbox)
 , _pin(this, lang(lng_pinned_pin), st::defaultBoxButton)
-, _cancel(this, lang(lng_cancel), st::cancelBoxButton)
-, _requestId(0) {
+, _cancel(this, lang(lng_cancel), st::cancelBoxButton) {
 	_text.resizeToWidth(st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right());
 	setMaxHeight(st::boxPadding.top() + _text.height() + st::boxMediumSkip + _notify.height() + st::boxPadding.bottom() + st::boxButtonPadding.top() + _pin.height() + st::boxButtonPadding.bottom());
 
@@ -441,10 +441,10 @@ RichDeleteMessageBox::RichDeleteMessageBox(ChannelData *channel, UserData *from,
 , _channel(channel)
 , _from(from)
 , _msgId(msgId)
-, _text(this, lang(lng_selected_delete_sure_this), st::boxLabel)
-, _banUser(this, lang(lng_ban_user), false)
-, _reportSpam(this, lang(lng_report_spam), false)
-, _deleteAll(this, lang(lng_delete_all_from), false)
+, _text(this, lang(lng_selected_delete_sure_this), FlatLabel::InitType::Simple, st::boxLabel)
+, _banUser(this, lang(lng_ban_user), false, st::defaultBoxCheckbox)
+, _reportSpam(this, lang(lng_report_spam), false, st::defaultBoxCheckbox)
+, _deleteAll(this, lang(lng_delete_all_from), false, st::defaultBoxCheckbox)
 , _delete(this, lang(lng_box_delete), st::defaultBoxButton)
 , _cancel(this, lang(lng_cancel), st::cancelBoxButton) {
 	t_assert(_channel != nullptr);
@@ -478,6 +478,7 @@ void RichDeleteMessageBox::onDelete() {
 	if (HistoryItem *item = App::histItemById(_channel ? peerToChannel(_channel->id) : 0, _msgId)) {
 		bool wasLast = (item->history()->lastMsg == item);
 		item->destroy();
+
 		if (_msgId > 0) {
 			App::main()->deleteMessages(_channel, QVector<MTPint>(1, MTP_int(_msgId)));
 		} else if (wasLast) {
@@ -503,4 +504,103 @@ void RichDeleteMessageBox::hideAll() {
 	_deleteAll.hide();
 	_delete.hide();
 	_cancel.hide();
+}
+
+KickMemberBox::KickMemberBox(PeerData *chat, UserData *member)
+: ConfirmBox(lng_profile_sure_kick(lt_user, member->firstName), lang(lng_box_remove))
+, _chat(chat)
+, _member(member) {
+	connect(this, SIGNAL(confirmed()), this, SLOT(onConfirm()));
+}
+
+void KickMemberBox::onConfirm() {
+	Ui::hideLayer();
+	if (auto chat = _chat->asChat()) {
+		App::main()->kickParticipant(chat, _member);
+	} else if (auto channel = _chat->asChannel()) {
+		App::api()->kickParticipant(channel, _member);
+	}
+}
+
+ConfirmInviteBox::ConfirmInviteBox(const QString &title, const MTPChatPhoto &photo, int count, const QVector<UserData*> &participants) : AbstractBox()
+, _title(this, st::confirmInviteTitle)
+, _status(this, st::confirmInviteStatus)
+, _photo(chatDefPhoto(0))
+, _participants(participants)
+, _join(this, lang(lng_group_invite_join), st::defaultBoxButton)
+, _cancel(this, lang(lng_cancel), st::cancelBoxButton) {
+	if (_participants.size() > 4) {
+		_participants.resize(4);
+	}
+
+	_title->setText(title);
+	QString status;
+	if (_participants.isEmpty() || _participants.size() >= count) {
+		status = lng_chat_status_members(lt_count, count);
+	} else {
+		status = lng_group_invite_members(lt_count, count);
+	}
+	_status->setText(status);
+	if (photo.type() == mtpc_chatPhoto) {
+		auto &d = photo.c_chatPhoto();
+		auto location = App::imageLocation(160, 160, d.vphoto_small);
+		if (!location.isNull()) {
+			_photo = ImagePtr(location);
+			if (!_photo->loaded()) {
+				connect(App::wnd(), SIGNAL(imageLoaded()), this, SLOT(update()));
+				_photo->load();
+			}
+		}
+	}
+
+	int h = st::confirmInviteStatusTop + _status->height() + st::boxPadding.bottom() + st::boxButtonPadding.top() + _join->height() + st::boxButtonPadding.bottom();
+	if (!_participants.isEmpty()) {
+		int skip = (width() - 4 * st::confirmInviteUserPhotoSize) / 5;
+		int padding = skip / 2;
+		_userWidth = (st::confirmInviteUserPhotoSize + 2 * padding);
+		int sumWidth = _participants.size() * _userWidth;
+		int left = (width() - sumWidth) / 2;
+		for_const (auto user, _participants) {
+			auto name = new FlatLabel(this, st::confirmInviteUserName);
+			name->resizeToWidth(st::confirmInviteUserPhotoSize + padding);
+			name->setText(user->firstName.isEmpty() ? App::peerName(user) : user->firstName);
+			name->moveToLeft(left + (padding / 2), st::confirmInviteUserNameTop);
+			left += _userWidth;
+		}
+
+		h += st::confirmInviteUserHeight;
+	}
+	setMaxHeight(h);
+
+	connect(_cancel, SIGNAL(clicked()), this, SLOT(onClose()));
+	connect(_join, SIGNAL(clicked()), App::main(), SLOT(onInviteImport()));
+}
+
+void ConfirmInviteBox::resizeEvent(QResizeEvent *e) {
+	_title->move((width() - _title->width()) / 2, st::confirmInviteTitleTop);
+	_status->move((width() - _status->width()) / 2, st::confirmInviteStatusTop);
+	_join->moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _join->height());
+	_cancel->moveToRight(st::boxButtonPadding.right() + _join->width() + st::boxButtonPadding.left(), _join->y());
+}
+
+void ConfirmInviteBox::paintEvent(QPaintEvent *e) {
+	Painter p(this);
+	if (paint(p)) return;
+
+	p.drawPixmap((width() - st::confirmInvitePhotoSize) / 2, st::confirmInvitePhotoTop, _photo->pixCircled(st::confirmInvitePhotoSize, st::confirmInvitePhotoSize));
+
+	int sumWidth = _participants.size() * _userWidth;
+	int left = (width() - sumWidth) / 2;
+	for_const (auto user, _participants) {
+		user->paintUserpicLeft(p, st::confirmInviteUserPhotoSize, left + (_userWidth - st::confirmInviteUserPhotoSize) / 2, st::confirmInviteUserPhotoTop, width());
+		left += _userWidth;
+	}
+}
+
+void ConfirmInviteBox::showAll() {
+	showChildren();
+}
+
+void ConfirmInviteBox::hideAll() {
+	hideChildren();
 }

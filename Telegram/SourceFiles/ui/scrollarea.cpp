@@ -140,10 +140,12 @@ void ScrollBar::paintEvent(QPaintEvent *e) {
 	int32 deltat = _vertical ? 0 : _st->deltax, deltab = _vertical ? 0 : _st->deltax;
 	p.setPen(Qt::NoPen);
 	if (_st->round) {
+		p.setRenderHint(QPainter::HighQualityAntialiasing, true);
 		p.setBrush(a_bg.current());
 		p.drawRoundedRect(QRect(deltal, deltat, width() - deltal - deltar, height() - deltat - deltab), _st->round, _st->round);
 		p.setBrush(a_bar.current());
 		p.drawRoundedRect(_bar, _st->round, _st->round);
+		p.setRenderHint(QPainter::HighQualityAntialiasing, false);
 	} else {
 		p.fillRect(QRect(deltal, deltat, width() - deltal - deltar, height() - deltat - deltab), a_bg.current());
 		p.fillRect(_bar, a_bar.current());
@@ -239,6 +241,8 @@ void ScrollBar::mousePressEvent(QMouseEvent *e) {
 			_a_appearance.start();
 		}
 	}
+
+	area()->setMovingByScrollBar(true);
 	emit area()->scrollStarted();
 }
 
@@ -262,6 +266,8 @@ void ScrollBar::mouseReleaseEvent(QMouseEvent *e) {
 			}
 		}
 		if (a) _a_appearance.start();
+
+		area()->setMovingByScrollBar(false);
 		emit area()->scrollFinished();
 	}
 	if (!_over) {
@@ -377,7 +383,12 @@ void ScrollArea::onScrolled() {
 			em = true;
 		}
 	}
-	if (em) emit scrolled();
+	if (em) {
+		emit scrolled();
+		if (!_movingByScrollBar) {
+			sendSynteticMouseEvent(this, QEvent::MouseMove, Qt::NoButton);
+		}
+	}
 }
 
 int ScrollArea::scrollWidth() const {
@@ -481,10 +492,8 @@ bool ScrollArea::eventFilter(QObject *obj, QEvent *e) {
 		QTouchEvent *ev = static_cast<QTouchEvent*>(e);
 		if (_touchEnabled && ev->device()->type() == QTouchDevice::TouchScreen) {
 			if (obj == widget()) {
-				if (ev->type() != QEvent::TouchBegin || ev->touchPoints().isEmpty() || !widget() || !widget()->childAt(widget()->mapFromGlobal(ev->touchPoints().cbegin()->screenPos().toPoint()))) {
-					touchEvent(ev);
-					return true;
-				}
+				touchEvent(ev);
+				return true;
 			}
 		}
 	}
@@ -495,10 +504,8 @@ bool ScrollArea::viewportEvent(QEvent *e) {
 	if (e->type() == QEvent::TouchBegin || e->type() == QEvent::TouchUpdate || e->type() == QEvent::TouchEnd || e->type() == QEvent::TouchCancel) {
 		QTouchEvent *ev = static_cast<QTouchEvent*>(e);
 		if (_touchEnabled && ev->device()->type() == QTouchDevice::TouchScreen) {
-			if (ev->type() != QEvent::TouchBegin || ev->touchPoints().isEmpty() || !widget() || !widget()->childAt(widget()->mapFromGlobal(ev->touchPoints().cbegin()->screenPos().toPoint()))) {
-				touchEvent(ev);
-				return true;
-			}
+			touchEvent(ev);
+			return true;
 		}
 	}
 	return QScrollArea::viewportEvent(e);
@@ -566,23 +573,20 @@ void ScrollArea::touchEvent(QTouchEvent *e) {
 				_touchWaitingAcceleration = false;
 				_touchPrevPosValid = false;
 			}
-		} else if (window() && widget()) { // one short tap -- like left mouse click, one long tap -- like right mouse click
-#ifdef Q_OS_WIN
+		} else if (window()) { // one short tap -- like left mouse click, one long tap -- like right mouse click
 			Qt::MouseButton btn(_touchRightButton ? Qt::RightButton : Qt::LeftButton);
-			QPoint mapped(widget()->mapFromGlobal(_touchStart)), winMapped(window()->mapFromGlobal(_touchStart));
 
-			QMouseEvent pressEvent(QEvent::MouseButtonPress, mapped, winMapped, _touchStart, btn, Qt::MouseButtons(btn), Qt::KeyboardModifiers());
-			pressEvent.accept();
-			qt_sendSpontaneousEvent(widget(), &pressEvent);
-
-			QMouseEvent releaseEvent(QEvent::MouseButtonRelease, mapped, winMapped, _touchStart, btn, Qt::MouseButtons(btn), Qt::KeyboardModifiers());
-			qt_sendSpontaneousEvent(widget(), &releaseEvent);
+			sendSynteticMouseEvent(this, QEvent::MouseMove, Qt::NoButton, _touchStart);
+			sendSynteticMouseEvent(this, QEvent::MouseButtonPress, btn, _touchStart);
+			sendSynteticMouseEvent(this, QEvent::MouseButtonRelease, btn, _touchStart);
 
 			if (_touchRightButton) {
-				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
-				qt_sendSpontaneousEvent(widget(), &contextEvent);
+				auto windowHandle = window()->windowHandle();
+				auto localPoint = windowHandle->mapFromGlobal(_touchStart);
+				QContextMenuEvent ev(QContextMenuEvent::Mouse, localPoint, _touchStart, QGuiApplication::keyboardModifiers());
+				ev.setTimestamp(getms());
+				QGuiApplication::sendEvent(windowHandle, &ev);
 			}
-#endif
 		}
 		_touchTimer.stop();
 		_touchRightButton = false;
@@ -649,34 +653,33 @@ void ScrollArea::moveEvent(QMoveEvent *e) {
 void ScrollArea::keyPressEvent(QKeyEvent *e) {
 	if ((e->key() == Qt::Key_Up || e->key() == Qt::Key_Down) && e->modifiers().testFlag(Qt::AltModifier)) {
 		e->ignore();
+	} else if(e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back) {
+		((QObject*)widget())->event(e);
 	} else {
 		QScrollArea::keyPressEvent(e);
 	}
 }
 
-void ScrollArea::enterEvent(QEvent *e) {
+void ScrollArea::enterEventHook(QEvent *e) {
 	if (_disabled) return;
 	if (_st.hiding) {
 		hor.hideTimeout(_st.hiding);
 		vert.hideTimeout(_st.hiding);
 	}
-	TWidget *p(tparent());
-	if (p) p->leaveToChildEvent(e);
 	return QScrollArea::enterEvent(e);
 }
 
-void ScrollArea::leaveEvent(QEvent *e) {
+void ScrollArea::leaveEventHook(QEvent *e) {
 	if (_st.hiding) {
 		hor.hideTimeout(0);
 		vert.hideTimeout(0);
 	}
-	TWidget *p(tparent());
-	if (p) p->enterFromChildEvent(e);
 	return QScrollArea::leaveEvent(e);
 }
 
 void ScrollArea::scrollToY(int toTop, int toBottom) {
 	myEnsureResized(widget());
+	myEnsureResized(this);
 
 	int toMin = 0, toMax = scrollTopMax();
 	if (toTop < toMin) {
@@ -718,6 +721,10 @@ void ScrollArea::setWidget(QWidget *w) {
 		hor.raise();
 		vert.raise();
 	}
+	if (_ownsWidget) {
+		_ownsWidget = false;
+		delete takeWidget();
+	}
 	QScrollArea::setWidget(w);
 	if (w) {
 		w->setAutoFillBackground(false);
@@ -736,6 +743,11 @@ void ScrollArea::setWidget(QWidget *w) {
 			splitted->update();
 		}
 	}
+}
+
+void ScrollArea::setOwnedWidget(QWidget *widget) {
+	setWidget(widget);
+	_ownsWidget = true;
 }
 
 QWidget *ScrollArea::takeWidget() {
@@ -784,6 +796,12 @@ bool ScrollArea::focusNextPrevChild(bool next) {
 	return false;
 }
 
+void ScrollArea::setMovingByScrollBar(bool movingByScrollBar) {
+	_movingByScrollBar = movingByScrollBar;
+}
+
 ScrollArea::~ScrollArea() {
-	takeWidget();
+	if (!_ownsWidget) {
+		takeWidget();
+	}
 }

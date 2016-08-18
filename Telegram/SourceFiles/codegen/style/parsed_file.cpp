@@ -43,6 +43,7 @@ constexpr int kErrorUnknownField       = 803;
 constexpr int kErrorIdentifierNotFound = 804;
 constexpr int kErrorAlreadyDefined     = 805;
 constexpr int kErrorBadString          = 806;
+constexpr int kErrorIconDuplicate      = 807;
 
 QString findInputFile(const Options &options) {
 	for (const auto &dir : options.includePaths) {
@@ -351,7 +352,8 @@ structure::Value ParsedFile::defaultConstructedStruct(const structure::FullName 
 }
 
 void ParsedFile::applyStructParent(structure::Value &result, const structure::FullName &parentName) {
-	if (auto parent = module_->findVariable(parentName)) {
+	bool fromTheSameModule = false;
+	if (auto parent = module_->findVariable(parentName, &fromTheSameModule)) {
 		if (parent->value.type() != result.type()) {
 			logErrorTypeMismatch() << "parent '" << logFullName(parentName) << "' has type '" << logType(parent->value.type()) << "' while child value has type " << logType(result.type());
 			return;
@@ -374,6 +376,22 @@ void ParsedFile::applyStructParent(structure::Value &result, const structure::Fu
 				const auto &srcValue(srcField.variable.value);
 				auto &dstValue(dstField.variable.value);
 				logAssert(srcValue.type() == dstValue.type()) << "struct field type check failed";
+
+				// Optimization: don't let the style files to contain unnamed inherited
+				// icons from the other (included) style files, because they will
+				// duplicate the binary data across different style c++ source files.
+				//
+				// Example:
+				// a.style has "A: Struct { icon: icon { ..file.. } };" and
+				// b.style has "B: Struct(A) { .. };" with non-overriden icon field.
+				// Then both style_a.cpp and style_b.cpp will contain binary data of "file".
+				if (!fromTheSameModule
+					&& srcValue.type().tag == structure::TypeTag::Icon
+					&& !srcValue.Icon().parts.empty()
+					&& srcValue.copyOf().isEmpty()) {
+					logError(kErrorIconDuplicate) << "an unnamed icon field '" << logFullName(srcField.variable.name) << "' is inherited from parent '" << logFullName(parentName) << "'";
+					return;
+				}
 				dstValue = srcValue;
 				dstField.status = Status::Implicit;
 			}
@@ -535,8 +553,8 @@ structure::Value ParsedFile::readPointValue() {
 		if (tokenValue(font) == "point") {
 			assertNextToken(BasicType::LeftParenthesis);
 
-			auto x = readNumericValue(); assertNextToken(BasicType::Comma);
-			auto y = readNumericValue();
+			auto x = readNumericOrNumericCopyValue(); assertNextToken(BasicType::Comma);
+			auto y = readNumericOrNumericCopyValue();
 			if (x.type().tag != structure::TypeTag::Pixels ||
 				y.type().tag != structure::TypeTag::Pixels) {
 				logErrorTypeMismatch() << "expected two px values for the point";
@@ -581,8 +599,8 @@ structure::Value ParsedFile::readSizeValue() {
 		if (tokenValue(font) == "size") {
 			assertNextToken(BasicType::LeftParenthesis);
 
-			auto w = readNumericValue(); assertNextToken(BasicType::Comma);
-			auto h = readNumericValue();
+			auto w = readNumericOrNumericCopyValue(); assertNextToken(BasicType::Comma);
+			auto h = readNumericOrNumericCopyValue();
 			if (w.type().tag != structure::TypeTag::Pixels ||
 				h.type().tag != structure::TypeTag::Pixels) {
 				logErrorTypeMismatch() << "expected two px values for the size";
@@ -662,10 +680,10 @@ structure::Value ParsedFile::readMarginsValue() {
 		if (tokenValue(font) == "margins") {
 			assertNextToken(BasicType::LeftParenthesis);
 
-			auto l = readNumericValue(); assertNextToken(BasicType::Comma);
-			auto t = readNumericValue(); assertNextToken(BasicType::Comma);
-			auto r = readNumericValue(); assertNextToken(BasicType::Comma);
-			auto b = readNumericValue();
+			auto l = readNumericOrNumericCopyValue(); assertNextToken(BasicType::Comma);
+			auto t = readNumericOrNumericCopyValue(); assertNextToken(BasicType::Comma);
+			auto r = readNumericOrNumericCopyValue(); assertNextToken(BasicType::Comma);
+			auto b = readNumericOrNumericCopyValue();
 			if (l.type().tag != structure::TypeTag::Pixels ||
 				t.type().tag != structure::TypeTag::Pixels ||
 				r.type().tag != structure::TypeTag::Pixels ||
@@ -701,18 +719,10 @@ structure::Value ParsedFile::readFontValue() {
 						file_.putBack();
 					}
 				}
-				if (auto familyValue = readStringValue()) {
+				if (auto familyValue = readStringOrStringCopyValue()) {
 					family = familyValue;
-				} else if (auto sizeValue = readNumericValue()) {
+				} else if (auto sizeValue = readNumericOrNumericCopyValue()) {
 					size = sizeValue;
-				} else if (auto copyValue = readCopyValue()) {
-					if (copyValue.type().tag == structure::TypeTag::String) {
-						family = copyValue;
-					} else if (copyValue.type().tag == structure::TypeTag::Pixels) {
-						size = copyValue;
-					} else {
-						logErrorUnexpectedToken() << "font family, font size or ')'";
-					}
 				} else if (file_.getToken(BasicType::RightParenthesis)) {
 					break;
 				} else {
@@ -776,7 +786,37 @@ structure::Value ParsedFile::readCopyValue() {
 		if (auto variable = module_->findVariable(name)) {
 			return variable->value.makeCopy(variable->name);
 		}
-		logError(kErrorIdentifierNotFound) << "identifier '" << logFullName(name) << "' not found";
+		file_.putBack();
+	}
+	return {};
+}
+
+structure::Value ParsedFile::readNumericOrNumericCopyValue() {
+	if (auto result = readNumericValue()) {
+		return result;
+	} else if (auto copy = readCopyValue()) {
+		auto type = copy.type().tag;
+		if (type == structure::TypeTag::Int
+			|| type == structure::TypeTag::Double
+			|| type == structure::TypeTag::Pixels) {
+			return copy;
+		} else {
+			file_.putBack();
+		}
+	}
+	return {};
+}
+
+structure::Value ParsedFile::readStringOrStringCopyValue() {
+	if (auto result = readStringValue()) {
+		return result;
+	} else if (auto copy = readCopyValue()) {
+		auto type = copy.type().tag;
+		if (type == structure::TypeTag::String) {
+			return copy;
+		} else {
+			file_.putBack();
+		}
 	}
 	return {};
 }

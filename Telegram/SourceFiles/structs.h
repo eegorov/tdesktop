@@ -270,13 +270,11 @@ public:
 	const ChatData *asChat() const;
 	ChannelData *asChannel();
 	const ChannelData *asChannel() const;
+	ChannelData *asMegagroup();
+	const ChannelData *asMegagroup() const;
 
 	ChatData *migrateFrom() const;
 	ChannelData *migrateTo() const;
-
-	void updateName(const QString &newName, const QString &newNameOrPhone, const QString &newUsername);
-
-	void fillNames();
 
 	const Text &dialogName() const;
 	const QString &shortName() const;
@@ -299,7 +297,7 @@ public:
 		MinimalLoaded = 0x01,
 		FullLoaded = 0x02,
 	};
-	LoadedStatus loadedStatus;
+	LoadedStatus loadedStatus = NotLoaded;
 	MTPinputPeer input;
 
 	int colorIndex;
@@ -313,16 +311,19 @@ public:
 	void loadUserpic(bool loadFirst = false, bool prior = true) {
 		_userpic->load(loadFirst, prior);
 	}
+	bool userpicLoaded() const {
+		return _userpic->loaded();
+	}
 	StorageKey userpicUniqueKey() const;
-	void saveUserpic(const QString &path) const;
+	void saveUserpic(const QString &path, int size) const;
 	QPixmap genUserpic(int size) const;
 
-	PhotoId photoId;
+	PhotoId photoId = UnknownPeerPhotoId;
 	StorageImageLocation photoLoc;
 
-	int nameVersion;
+	int nameVersion = 1;
 
-	NotifySettingsPtr notify;
+	NotifySettingsPtr notify = UnknownNotifySettings;
 
 	// if this string is not empty we must not allow to open the
 	// conversation and we must show this string instead
@@ -338,10 +339,14 @@ public:
 	}
 
 protected:
+	void updateNameDelayed(const QString &newName, const QString &newNameOrPhone, const QString &newUsername);
+
 	ImagePtr _userpic;
 	ImagePtr currentUserpic() const;
 
 private:
+	void fillNames();
+
 	ClickHandlerPtr _openLink;
 
 };
@@ -384,28 +389,24 @@ struct BotInfo {
 	PeerId inlineReturnPeerId = 0;
 };
 
-enum UserBlockedStatus {
-	UserBlockUnknown = 0,
-	UserIsBlocked,
-	UserIsNotBlocked,
-};
-
 class PhotoData;
 class UserData : public PeerData {
 public:
 
 	UserData(const PeerId &id) : PeerData(id) {
-		setName(QString(), QString(), QString(), QString());
 	}
 	void setPhoto(const MTPUserProfilePhoto &photo);
-	void setName(const QString &first, const QString &last, const QString &phoneName, const QString &username);
+
+	void setName(const QString &newFirstName, const QString &newLastName
+		, const QString &newPhoneName, const QString &newUsername);
+
 	void setPhone(const QString &newPhone);
 	void setBotInfoVersion(int version);
 	void setBotInfo(const MTPBotInfo &info);
 
 	void setNameOrPhone(const QString &newNameOrPhone);
 
-	void madeAction(); // pseudo-online
+	void madeAction(TimeId when); // pseudo-online
 
 	uint64 access = 0;
 
@@ -419,26 +420,58 @@ public:
 	bool canWrite() const {
 		return access != UserNoAccess;
 	}
+	bool isContact() const {
+		return (contact > 0);
+	}
+
+	bool canShareThisContact() const;
+	bool canAddContact() const {
+		return canShareThisContact() && !isContact();
+	}
+
+	// In feedUsers() we check only that.
+	// When actually trying to share contact we perform
+	// a full check by canShareThisContact() call.
+	bool canShareThisContactFast() const {
+		return !_phone.isEmpty();
+	}
 
 	MTPInputUser inputUser;
 
 	QString firstName;
 	QString lastName;
 	QString username;
-	QString phone;
+	const QString &phone() const {
+		return _phone;
+	}
 	QString nameOrPhone;
 	Text phoneText;
 	TimeId onlineTill = 0;
 	int32 contact = -1; // -1 - not contact, cant add (self, empty, deleted, foreign), 0 - not contact, can add (request), 1 - contact
-	UserBlockedStatus blocked = UserBlockUnknown;
+
+	enum class BlockStatus {
+		Unknown,
+		Blocked,
+		NotBlocked,
+	};
+	BlockStatus blockStatus() const {
+		return _blockStatus;
+	}
+	bool isBlocked() const {
+		return (blockStatus() == BlockStatus::Blocked);
+	}
+	void setBlockStatus(BlockStatus blockStatus);
 
 	typedef QList<PhotoData*> Photos;
 	Photos photos;
 	int photosCount = -1; // -1 not loaded, 0 all loaded
 
-	QString about;
+	bool setAbout(const QString &newAbout);
+	const QString &about() const {
+		return _about;
+	}
 
-	BotInfo *botInfo = nullptr;
+	std_::unique_ptr<BotInfo> botInfo;
 
 	QString restrictionReason() const override {
 		return _restrictionReason;
@@ -449,46 +482,36 @@ public:
 
 private:
 	QString _restrictionReason;
+	QString _about;
+	QString _phone;
+	BlockStatus _blockStatus = BlockStatus::Unknown;
 
 };
 
 class ChatData : public PeerData {
 public:
-
-	ChatData(const PeerId &id) : PeerData(id)
-		, inputChat(MTP_int(bareId()))
-		, migrateToPtr(0)
-		, count(0)
-		, date(0)
-		, version(0)
-		, creator(0)
-		, flags(0)
-		, isForbidden(false)
-		, botStatus(0) {
+	ChatData(const PeerId &id) : PeerData(id), inputChat(MTP_int(bareId())) {
 	}
 	void setPhoto(const MTPChatPhoto &photo, const PhotoId &phId = UnknownPeerPhotoId);
-	void invalidateParticipants() {
-		participants = ChatData::Participants();
-		admins = ChatData::Admins();
-		flags &= ~MTPDchat::Flag::f_admin;
-		invitedByMe = ChatData::InvitedByMe();
-		botStatus = 0;
-	}
+
+	void setName(const QString &newName);
+
+	void invalidateParticipants();
 	bool noParticipantInfo() const {
 		return (count > 0 || amIn()) && participants.isEmpty();
 	}
 
 	MTPint inputChat;
 
-	ChannelData *migrateToPtr;
+	ChannelData *migrateToPtr = nullptr;
 
-	int count;
-	TimeId date;
-	int version;
-	UserId creator;
+	int count = 0;
+	TimeId date = 0;
+	int version = 0;
+	UserId creator = 0;
 
-	MTPDchat::Flags flags;
-	bool isForbidden;
+	MTPDchat::Flags flags = 0;
+	bool isForbidden = false;
 	bool amIn() const {
 		return !isForbidden && !haveLeft() && !wasKicked();
 	}
@@ -529,9 +552,17 @@ public:
 	LastAuthors lastAuthors;
 	typedef OrderedSet<PeerData*> MarkupSenders;
 	MarkupSenders markupSenders;
-	int32 botStatus; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
+	int botStatus = 0; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
 //	ImagePtr photoFull;
-	QString invitationUrl;
+
+	void setInviteLink(const QString &newInviteLink);
+	QString inviteLink() const {
+		return _inviteLink;
+	}
+
+private:
+	QString _inviteLink;
+
 };
 
 enum PtsSkippedQueue {
@@ -630,13 +661,10 @@ struct MegagroupInfo {
 
 class ChannelData : public PeerData {
 public:
-
-	ChannelData(const PeerId &id) : PeerData(id)
-		, inputChannel(MTP_inputChannel(MTP_int(bareId()), MTP_long(0)))
-		, mgInfo(nullptr) {
-		setName(QString(), QString());
+	ChannelData(const PeerId &id) : PeerData(id), inputChannel(MTP_inputChannel(MTP_int(bareId()), MTP_long(0))) {
 	}
 	void setPhoto(const MTPChatPhoto &photo, const PhotoId &phId = UnknownPeerPhotoId);
+
 	void setName(const QString &name, const QString &username);
 
 	void updateFull(bool force = false);
@@ -646,10 +674,24 @@ public:
 
 	MTPinputChannel inputChannel;
 
-	QString username, about;
+	QString username;
 
-	int count = 1;
-	int adminsCount = 1;
+	// Returns true if about text was changed.
+	bool setAbout(const QString &newAbout);
+	const QString &about() const {
+		return _about;
+	}
+
+	int membersCount() const {
+		return _membersCount;
+	}
+	void setMembersCount(int newMembersCount);
+
+	int adminsCount() const {
+		return _adminsCount;
+	}
+	void setAdminsCount(int newAdminsCount);
+
 	int32 date = 0;
 	int version = 0;
 	MTPDchannel::Flags flags = { 0 };
@@ -659,13 +701,14 @@ public:
 		if (!mgInfo || !(mgInfo->lastParticipantsStatus & MegagroupInfo::LastParticipantsCountOutdated)) {
 			return false;
 		}
-		if (mgInfo->lastParticipantsCount == count) {
+		if (mgInfo->lastParticipantsCount == membersCount()) {
 			mgInfo->lastParticipantsStatus &= ~MegagroupInfo::LastParticipantsCountOutdated;
 			return false;
 		}
 		return true;
 	}
 	void flagsUpdated();
+	void selfAdminUpdated();
 	bool isMegagroup() const {
 		return flags & MTPDchannel::Flag::f_megagroup;
 	}
@@ -674,9 +717,6 @@ public:
 	}
 	bool isPublic() const {
 		return flags & MTPDchannel::Flag::f_username;
-	}
-	bool canEditUsername() const {
-		return amCreator() && (flagsFull & MTPDchannelFull::Flag::f_can_set_username);
 	}
 	bool amCreator() const {
 		return flags & MTPDchannel::Flag::f_creator;
@@ -702,8 +742,11 @@ public:
 	bool canWrite() const {
 		return amIn() && (canPublish() || !isBroadcast());
 	}
-	bool canViewParticipants() const {
+	bool canViewMembers() const {
 		return flagsFull & MTPDchannelFull::Flag::f_can_view_participants;
+	}
+	bool canViewAdmins() const {
+		return (isMegagroup() || amCreator() || amEditor() || amModerator());
 	}
 	bool addsSignature() const {
 		return flags & MTPDchannel::Flag::f_signatures;
@@ -712,12 +755,25 @@ public:
 	bool isVerified() const {
 		return flags & MTPDchannel::Flag::f_verified;
 	}
-	bool canAddParticipants() const {
+	bool canAddMembers() const {
 		return amCreator() || amEditor() || (flags & MTPDchannel::Flag::f_democracy);
+	}
+	bool canEditPhoto() const {
+		return amCreator() || (amEditor() && isMegagroup());
+	}
+	bool canEditUsername() const {
+		return amCreator() && (flagsFull & MTPDchannelFull::Flag::f_can_set_username);
+	}
+	bool canDelete() const {
+		return amCreator() && (membersCount() <= 1000);
 	}
 
 //	ImagePtr photoFull;
-	QString invitationUrl;
+
+	void setInviteLink(const QString &newInviteLink);
+	QString inviteLink() const {
+		return _inviteLink;
+	}
 
 	int32 inviter = 0; // > 0 - user who invited me to channel, < 0 - not in channel
 	QDateTime inviteDate;
@@ -765,11 +821,16 @@ public:
 	~ChannelData();
 
 private:
-
 	PtsWaiter _ptsWaiter;
 	uint64 _lastFullUpdate = 0;
 
+	int _membersCount = 1;
+	int _adminsCount = 1;
+
 	QString _restrictionReason;
+	QString _about;
+
+	QString _inviteLink;
 
 };
 
@@ -817,6 +878,18 @@ inline const ChannelData *PeerData::asChannel() const {
 }
 inline const ChannelData *asChannel(const PeerData *peer) {
 	return peer ? peer->asChannel() : nullptr;
+}
+inline ChannelData *PeerData::asMegagroup() {
+	return isMegagroup() ? static_cast<ChannelData*>(this) : nullptr;
+}
+inline ChannelData *asMegagroup(PeerData *peer) {
+	return peer ? peer->asMegagroup() : nullptr;
+}
+inline const ChannelData *PeerData::asMegagroup() const {
+	return isMegagroup() ? static_cast<const ChannelData*>(this) : nullptr;
+}
+inline const ChannelData *asMegagroup(const PeerData *peer) {
+	return peer ? peer->asMegagroup() : nullptr;
 }
 inline bool isMegagroup(const PeerData *peer) {
 	return peer ? peer->isMegagroup() : false;
@@ -995,7 +1068,7 @@ class Document;
 class DocumentData {
 public:
 	static DocumentData *create(DocumentId id);
-	static DocumentData *create(DocumentId id, int32 dc, uint64 accessHash, const QVector<MTPDocumentAttribute> &attributes);
+	static DocumentData *create(DocumentId id, int32 dc, uint64 accessHash, int32 version, const QVector<MTPDocumentAttribute> &attributes);
 	static DocumentData *create(DocumentId id, const QString &url, const QVector<MTPDocumentAttribute> &attributes);
 
 	void setattributes(const QVector<MTPDocumentAttribute> &attributes);
@@ -1086,6 +1159,7 @@ public:
 		_data = data;
 	}
 
+	bool setRemoteVersion(int32 version); // Returns true if version has changed.
 	void setRemoteLocation(int32 dc, uint64 access);
 	void setContentUrl(const QString &url);
 	bool hasRemoteLocation() const {
@@ -1123,11 +1197,11 @@ public:
 	int32 md5[8];
 
 	MediaKey mediaKey() const {
-		return ::mediaKey(locationType(), _dc, id);
+		return ::mediaKey(locationType(), _dc, id, _version);
 	}
 
 private:
-	DocumentData(DocumentId id, int32 dc, uint64 accessHash, const QString &url, const QVector<MTPDocumentAttribute> &attributes);
+	DocumentData(DocumentId id, int32 dc, uint64 accessHash, int32 version, const QString &url, const QVector<MTPDocumentAttribute> &attributes);
 
 	friend class Serialize::Document;
 
@@ -1135,9 +1209,10 @@ private:
 		return voice() ? AudioFileLocation : (isVideo() ? VideoFileLocation : DocumentFileLocation);
 	}
 
-	// Two types of location: from MTProto by dc+access or from web by url
+	// Two types of location: from MTProto by dc+access+version or from web by url
 	int32 _dc = 0;
 	uint64 _access = 0;
+	int32 _version = 0;
 	QString _url;
 
 	FileLocation _location;
@@ -1156,51 +1231,64 @@ private:
 VoiceWaveform documentWaveformDecode(const QByteArray &encoded5bit);
 QByteArray documentWaveformEncode5bit(const VoiceWaveform &waveform);
 
-struct SongMsgId {
-	SongMsgId() : song(nullptr) {
-	}
-	SongMsgId(DocumentData *song, const FullMsgId &msgId) : song(song), contextId(msgId) {
-	}
-	SongMsgId(DocumentData *song, ChannelId channelId, MsgId msgId) : song(song), contextId(channelId, msgId) {
-	}
-	explicit operator bool() const {
-		return song;
-	}
-	DocumentData *song;
-	FullMsgId contextId;
+class AudioMsgId {
+public:
+	enum class Type {
+		Unknown,
+		Voice,
+		Song,
+		Video,
+	};
 
-};
-inline bool operator<(const SongMsgId &a, const SongMsgId &b) {
-	return quintptr(a.song) < quintptr(b.song) || (quintptr(a.song) == quintptr(b.song) && a.contextId < b.contextId);
-}
-inline bool operator==(const SongMsgId &a, const SongMsgId &b) {
-	return a.song == b.song && a.contextId == b.contextId;
-}
-inline bool operator!=(const SongMsgId &a, const SongMsgId &b) {
-	return !(a == b);
-}
+	AudioMsgId() {
+	}
+	AudioMsgId(DocumentData *audio, const FullMsgId &msgId) : _audio(audio), _contextId(msgId) {
+		setTypeFromAudio();
+	}
+	AudioMsgId(DocumentData *audio, ChannelId channelId, MsgId msgId) : _audio(audio), _contextId(channelId, msgId) {
+		setTypeFromAudio();
+	}
+	AudioMsgId(Type type) : _type(type) {
+	}
 
-struct AudioMsgId {
-	AudioMsgId() : audio(nullptr) {
+	Type type() const {
+		return _type;
 	}
-	AudioMsgId(DocumentData *audio, const FullMsgId &msgId) : audio(audio), contextId(msgId) {
+	DocumentData *audio() const {
+		return _audio;
 	}
-	AudioMsgId(DocumentData *audio, ChannelId channelId, MsgId msgId) : audio(audio), contextId(channelId, msgId) {
+	FullMsgId contextId() const {
+		return _contextId;
 	}
 
 	explicit operator bool() const {
-		return audio;
+		return _audio || (_type == Type::Video);
 	}
-	DocumentData *audio;
-	FullMsgId contextId;
+
+private:
+	void setTypeFromAudio() {
+		if (_audio->voice()) {
+			_type = Type::Voice;
+		} else if (_audio->song()) {
+			_type = Type::Song;
+		} else if (_audio->isVideo()) {
+			_type = Type::Video;
+		} else {
+			_type = Type::Unknown;
+		}
+	}
+
+	DocumentData *_audio = nullptr;
+	Type _type = Type::Unknown;
+	FullMsgId _contextId;
 
 };
 
 inline bool operator<(const AudioMsgId &a, const AudioMsgId &b) {
-	return quintptr(a.audio) < quintptr(b.audio) || (quintptr(a.audio) == quintptr(b.audio) && a.contextId < b.contextId);
+	return quintptr(a.audio()) < quintptr(b.audio()) || (quintptr(a.audio()) == quintptr(b.audio()) && a.contextId() < b.contextId());
 }
 inline bool operator==(const AudioMsgId &a, const AudioMsgId &b) {
-	return a.audio == b.audio && a.contextId == b.contextId;
+	return a.audio() == b.audio() && a.contextId() == b.contextId();
 }
 inline bool operator!=(const AudioMsgId &a, const AudioMsgId &b) {
 	return !(a == b);

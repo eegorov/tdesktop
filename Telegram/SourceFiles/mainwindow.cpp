@@ -21,6 +21,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "stdafx.h"
 #include "mainwindow.h"
 
+#include "styles/style_dialogs.h"
 #include "zip.h"
 #include "lang.h"
 #include "shortcuts.h"
@@ -35,9 +36,11 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "boxes/confirmbox.h"
 #include "boxes/contactsbox.h"
 #include "boxes/addcontactbox.h"
+#include "observer_peer.h"
 #include "autoupdater.h"
 #include "mediaview.h"
 #include "localstorage.h"
+#include "apiwrap.h"
 
 ConnectingWidget::ConnectingWidget(QWidget *parent, const QString &text, const QString &reconnect) : QWidget(parent), _shadow(st::boxShadow), _reconnect(this, QString()) {
 	set(text, reconnect);
@@ -171,7 +174,7 @@ void NotifyWindow::updateNotifyDisplay() {
 			history->peer->loadUserpic(true, true);
 			history->peer->paintUserpicLeft(p, st::notifyPhotoSize, st::notifyPhotoPos.x(), st::notifyPhotoPos.y(), width());
 		} else {
-			static QPixmap icon = QPixmap::fromImage(App::wnd()->iconLarge().scaled(st::notifyPhotoSize, st::notifyPhotoSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation), Qt::ColorOnly);
+			static QPixmap icon = App::pixmapFromImageInPlace(App::wnd()->iconLarge().scaled(st::notifyPhotoSize, st::notifyPhotoSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
 			p.drawPixmap(st::notifyPhotoPos.x(), st::notifyPhotoPos.y(), icon);
 		}
 
@@ -180,48 +183,48 @@ void NotifyWindow::updateNotifyDisplay() {
 		QRect rectForName(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyTextTop, itemWidth, st::msgNameFont->height);
 		if (!App::passcoded() && cNotifyView() <= dbinvShowName) {
 			if (history->peer->isChat() || history->peer->isMegagroup()) {
-				p.drawSprite(QPoint(rectForName.left() + st::dlgChatImgPos.x(), rectForName.top() + st::dlgChatImgPos.y()), st::dlgChatImg);
-				rectForName.setLeft(rectForName.left() + st::dlgImgSkip);
+				p.drawSprite(QPoint(rectForName.left() + st::dialogsChatImgPos.x(), rectForName.top() + st::dialogsChatImgPos.y()), st::dlgChatImg);
+				rectForName.setLeft(rectForName.left() + st::dialogsImgSkip);
 			} else if (history->peer->isChannel()) {
-				p.drawSprite(QPoint(rectForName.left() + st::dlgChannelImgPos.x(), rectForName.top() + st::dlgChannelImgPos.y()), st::dlgChannelImg);
-				rectForName.setLeft(rectForName.left() + st::dlgImgSkip);
+				p.drawSprite(QPoint(rectForName.left() + st::dialogsChannelImgPos.x(), rectForName.top() + st::dialogsChannelImgPos.y()), st::dlgChannelImg);
+				rectForName.setLeft(rectForName.left() + st::dialogsImgSkip);
 			}
 		}
 
 		QDateTime now(QDateTime::currentDateTime()), lastTime(item->date);
 		QDate nowDate(now.date()), lastDate(lastTime.date());
 		QString dt = lastTime.toString(cTimeFormat());
-		int32 dtWidth = st::dlgHistFont->width(dt);
-		rectForName.setWidth(rectForName.width() - dtWidth - st::dlgDateSkip);
-		p.setFont(st::dlgDateFont->f);
-		p.setPen(st::dlgDateColor->p);
-		p.drawText(rectForName.left() + rectForName.width() + st::dlgDateSkip, rectForName.top() + st::dlgHistFont->ascent, dt);
+		int32 dtWidth = st::dialogsTextFont->width(dt);
+		rectForName.setWidth(rectForName.width() - dtWidth - st::dialogsDateSkip);
+		p.setFont(st::dialogsDateFont);
+		p.setPen(st::dialogsDateFg);
+		p.drawText(rectForName.left() + rectForName.width() + st::dialogsDateSkip, rectForName.top() + st::dialogsTextFont->ascent, dt);
 
 		if (!App::passcoded() && cNotifyView() <= dbinvShowPreview) {
 			const HistoryItem *textCachedFor = 0;
 			Text itemTextCache(itemWidth);
-			QRect r(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height, itemWidth, 2 * st::dlgFont->height);
+			QRect r(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height, itemWidth, 2 * st::dialogsTextFont->height);
 			if (fwdCount < 2) {
 				bool active = false;
 				item->drawInDialog(p, r, active, textCachedFor, itemTextCache);
 			} else {
-				p.setFont(st::dlgHistFont->f);
+				p.setFont(st::dialogsTextFont);
 				if (item->hasFromName() && !item->isPost()) {
-					itemTextCache.setText(st::dlgHistFont, item->author()->name);
-					p.setPen(st::dlgSystemColor->p);
-					itemTextCache.drawElided(p, r.left(), r.top(), r.width(), st::dlgHistFont->height);
-					r.setTop(r.top() + st::dlgHistFont->height);
+					itemTextCache.setText(st::dialogsTextFont, item->author()->name);
+					p.setPen(st::dialogsTextFgService);
+					itemTextCache.drawElided(p, r.left(), r.top(), r.width(), st::dialogsTextFont->height);
+					r.setTop(r.top() + st::dialogsTextFont->height);
 				}
-				p.setPen(st::dlgTextColor->p);
-				p.drawText(r.left(), r.top() + st::dlgHistFont->ascent, lng_forward_messages(lt_count, fwdCount));
+				p.setPen(st::dialogsTextFg);
+				p.drawText(r.left(), r.top() + st::dialogsTextFont->ascent, lng_forward_messages(lt_count, fwdCount));
 			}
 		} else {
-			static QString notifyText = st::dlgHistFont->elided(lang(lng_notification_preview), itemWidth);
-			p.setPen(st::dlgSystemColor->p);
-			p.drawText(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height + st::dlgHistFont->ascent, notifyText);
+			static QString notifyText = st::dialogsTextFont->elided(lang(lng_notification_preview), itemWidth);
+			p.setPen(st::dialogsTextFgService);
+			p.drawText(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height + st::dialogsTextFont->ascent, notifyText);
 		}
 
-		p.setPen(st::dlgNameColor->p);
+		p.setPen(st::dialogsNameFg);
 		if (!App::passcoded() && cNotifyView() <= dbinvShowName) {
 			history->peer->dialogName().drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 		} else {
@@ -231,7 +234,7 @@ void NotifyWindow::updateNotifyDisplay() {
 		}
 	}
 
-	pm = QPixmap::fromImage(img, Qt::ColorOnly);
+	pm = App::pixmapFromImageInPlace(std_::move(img));
 	update();
 }
 
@@ -243,7 +246,7 @@ void NotifyWindow::updatePeerPhoto() {
 			p.drawPixmap(st::notifyPhotoPos.x(), st::notifyPhotoPos.y(), peerPhoto->pix(st::notifyPhotoSize));
 		}
 		peerPhoto = ImagePtr();
-		pm = QPixmap::fromImage(img, Qt::ColorOnly);
+		pm = App::pixmapFromImageInPlace(std_::move(img));
 		update();
 	}
 }
@@ -361,7 +364,7 @@ NotifyWindow::~NotifyWindow() {
 	if (App::wnd()) App::wnd()->notifyShowNext(this);
 }
 
-MainWindow::MainWindow(QWidget *parent) : PsMainWindow(parent) {
+MainWindow::MainWindow() {
 	icon16 = icon256.scaledToWidth(16, Qt::SmoothTransformation);
 	icon32 = icon256.scaledToWidth(32, Qt::SmoothTransformation);
 	icon64 = icon256.scaledToWidth(64, Qt::SmoothTransformation);
@@ -414,7 +417,9 @@ void MainWindow::onInactiveTimer() {
 	inactivePress(false);
 }
 
-void MainWindow::stateChanged(Qt::WindowState state) {
+void MainWindow::onStateChanged(Qt::WindowState state) {
+	stateChangedHook(state);
+
 	psUserActionDone();
 
 	updateIsActive((state == Qt::WindowMinimized) ? Global::OfflineBlurTimeout() : Global::OnlineFocusTimeout());
@@ -431,11 +436,11 @@ void MainWindow::init() {
 	setWindowIcon(wndIcon);
 
 	Application::instance()->installEventFilter(this);
-	connect(windowHandle(), SIGNAL(windowStateChanged(Qt::WindowState)), this, SLOT(stateChanged(Qt::WindowState)));
+	connect(windowHandle(), SIGNAL(windowStateChanged(Qt::WindowState)), this, SLOT(onStateChanged(Qt::WindowState)));
 	connect(windowHandle(), SIGNAL(activeChanged()), this, SLOT(checkHistoryActivation()), Qt::QueuedConnection);
 
 	QPalette p(palette());
-	p.setColor(QPalette::Window, st::wndBG->c);
+	p.setColor(QPalette::Window, st::windowBg->c);
 	setPalette(p);
 
 	title = new TitleWidget(this);
@@ -450,7 +455,7 @@ void MainWindow::firstShow() {
 #else
 	trayIconMenu = new QMenu(this);
 #endif
-	QString notificationItem = lang(cDesktopNotify()
+	auto notificationItem = lang(cDesktopNotify()
 		? lng_disable_notifications_from_tray : lng_enable_notifications_from_tray);
 
 	if (cPlatform() == dbipWindows || cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
@@ -464,9 +469,10 @@ void MainWindow::firstShow() {
 		trayIconMenu->addAction(lang(lng_quit_from_tray), this, SLOT(quitFromTray()))->setEnabled(true);
 	}
 	psUpdateWorkmode();
-
 	psFirstShow();
 	updateTrayMenu();
+
+	_mediaView = new MediaView();
 }
 
 QWidget *MainWindow::filedialogParent() {
@@ -499,9 +505,7 @@ void MainWindow::clearWidgets() {
 		intro = 0;
 	}
 	if (_mediaView) {
-		if (!_mediaView->isHidden()) {
-			_mediaView->hide();
-		}
+		hideMediaview();
 		_mediaView->rpcClear();
 	}
 	title->updateBackButton();
@@ -593,6 +597,10 @@ void MainWindow::setupIntro(bool anim) {
 	cSetDialogsReceived(false);
 	if (intro && !intro->isHidden() && !main) return;
 
+	if (_mediaView) {
+		_mediaView->clearData();
+	}
+
 	QPixmap bg = anim ? grabInner() : QPixmap();
 
 	clearWidgets();
@@ -611,10 +619,6 @@ void MainWindow::setupIntro(bool anim) {
 		MTP::cancel(_serviceHistoryRequest);
 		_serviceHistoryRequest = 0;
 	}
-}
-
-void MainWindow::getNotifySetting(const MTPInputNotifyPeer &peer, uint32 msWait) {
-	MTP::send(MTPaccount_GetNotifySettings(peer), main->rpcDone(&MainWidget::gotNotifySetting, peer), main->rpcFail(&MainWidget::failNotifySetting, peer), 0, msWait);
 }
 
 void MainWindow::serviceNotification(const QString &msg, const MTPMessageMedia &media, bool force) {
@@ -666,8 +670,6 @@ void MainWindow::setupMain(bool anim, const MTPUser *self) {
 	fixOrder();
 
 	updateTitleStatus();
-
-	_mediaView = new MediaView();
 }
 
 void MainWindow::updateUnreadCounter() {
@@ -773,7 +775,7 @@ PasscodeWidget *MainWindow::passcodeWidget() {
 }
 
 void MainWindow::showPhoto(const PhotoOpenClickHandler *lnk, HistoryItem *item) {
-	return lnk->peer() ? showPhoto(lnk->photo(), lnk->peer()) : showPhoto(lnk->photo(), item);
+	return (!item && lnk->peer()) ? showPhoto(lnk->photo(), lnk->peer()) : showPhoto(lnk->photo(), item);
 }
 
 void MainWindow::showPhoto(PhotoData *photo, HistoryItem *item) {
@@ -904,13 +906,13 @@ void MainWindow::hideConnecting() {
 	if (settings) settings->update();
 }
 
-bool MainWindow::historyIsActive() const {
-    return isActive(false) && main && main->historyIsActive() && (!settings || !settings->isVisible());
+bool MainWindow::doWeReadServerHistory() const {
+	return isActive(false) && main && (!settings || !settings->isVisible()) && main->doWeReadServerHistory();
 }
 
 void MainWindow::checkHistoryActivation() {
-	if (main && MTP::authedId() && historyIsActive()) {
-		main->historyWasRead();
+	if (main && MTP::authedId() && doWeReadServerHistory()) {
+		main->markActiveHistoryAsRead();
 	}
     QTimer::singleShot(1, this, SLOT(updateTrayMenu()));
 }
@@ -925,13 +927,26 @@ void MainWindow::layerHidden() {
 	setInnerFocus();
 }
 
+void MainWindow::onReActivate() {
+	if (auto w = App::wnd()) {
+		if (auto f = QApplication::focusWidget()) {
+			f->clearFocus();
+		}
+		w->windowHandle()->requestActivate();
+		w->activate();
+		if (auto f = QApplication::focusWidget()) {
+			f->clearFocus();
+		}
+		w->setInnerFocus();
+    }
+}
+
 void MainWindow::hideMediaview() {
     if (_mediaView && !_mediaView->isHidden()) {
         _mediaView->hide();
 #if defined Q_OS_LINUX32 || defined Q_OS_LINUX64
-        if (App::wnd()) {
-            App::wnd()->activateWindow();
-        }
+		onReActivate();
+		QTimer::singleShot(200, this, SLOT(onReActivate()));
 #endif
     }
 }
@@ -1057,7 +1072,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e) {
 		if (obj == Application::instance()) {
 			QString url = static_cast<QFileOpenEvent*>(e)->url().toEncoded().trimmed();
 			if (url.startsWith(qstr("tg://"), Qt::CaseInsensitive)) {
-				cSetStartUrl(url);
+				cSetStartUrl(url.mid(0, 8192));
 				if (!cStartUrl().isEmpty() && App::main() && App::self()) {
 					App::main()->openLocalUrl(cStartUrl());
 					cSetStartUrl(QString());
@@ -1070,7 +1085,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e) {
 	case QEvent::WindowStateChange:
 		if (obj == this) {
 			Qt::WindowState state = (windowState() & Qt::WindowMinimized) ? Qt::WindowMinimized : ((windowState() & Qt::WindowMaximized) ? Qt::WindowMaximized : ((windowState() & Qt::WindowFullScreen) ? Qt::WindowFullScreen : Qt::WindowNoState));
-			stateChanged(state);
+			onStateChanged(state);
 		}
 		break;
 
@@ -1082,7 +1097,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e) {
 		break;
 	}
 
-	return PsMainWindow::eventFilter(obj, e);
+	return Platform::MainWindow::eventFilter(obj, e);
 }
 
 void MainWindow::mouseMoveEvent(QMouseEvent *e) {
@@ -1108,7 +1123,7 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *e) {
 bool MainWindow::minimizeToTray() {
     if (App::quitting() || !psHasTrayIcon()) return false;
 
-	hide();
+	closeWithoutDestroy();
     if (cPlatform() == dbipWindows && trayIcon && !cSeenTrayTooltip()) {
 		trayIcon->showMessage(str_const_toString(AppName), lang(lng_tray_icon_text), QSystemTrayIcon::Information, 10000);
 		cSetSeenTrayTooltip(true);
@@ -1284,10 +1299,14 @@ void MainWindow::toggleDisplayNotifyFromTray() {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
-	if (MTP::authedId() && !Sandbox::isSavingSession() && Ui::hideWindowNoQuit()) {
-		e->ignore();
-	} else {
+	if (Sandbox::isSavingSession()) {
+		e->accept();
 		App::quit();
+	} else {
+		e->ignore();
+		if (!MTP::authedId() || !Ui::hideWindowNoQuit()) {
+			App::quit();
+		}
 	}
 }
 
@@ -1374,7 +1393,7 @@ void MainWindow::onClearFailed(int task, void *manager) {
 }
 
 void MainWindow::notifySchedule(History *history, HistoryItem *item) {
-	if (App::quitting() || !history->currentNotification() || !main) return;
+	if (App::quitting() || !history->currentNotification() || !App::api()) return;
 
 	PeerData *notifyByFrom = (!history->peer->isUser() && item->mentionsMe()) ? item->from() : 0;
 
@@ -1394,7 +1413,7 @@ void MainWindow::notifySchedule(History *history, HistoryItem *item) {
 						return;
 					}
 				} else {
-					App::wnd()->getNotifySetting(MTP_inputNotifyPeer(notifyByFrom->input));
+					App::api()->requestNotifySetting(notifyByFrom);
 				}
 			} else {
 				history->popNotification(item);
@@ -1403,9 +1422,9 @@ void MainWindow::notifySchedule(History *history, HistoryItem *item) {
 		}
 	} else {
 		if (notifyByFrom && notifyByFrom->notify == UnknownNotifySettings) {
-			App::wnd()->getNotifySetting(MTP_inputNotifyPeer(notifyByFrom->input), 10);
+			App::api()->requestNotifySetting(notifyByFrom);
 		}
-		App::wnd()->getNotifySetting(MTP_inputNotifyPeer(history->peer->input));
+		App::api()->requestNotifySetting(history->peer);
 	}
 	if (!item->notificationReady()) {
 		haveSetting = false;
@@ -1420,6 +1439,7 @@ void MainWindow::notifySchedule(History *history, HistoryItem *item) {
 	} else if (cOtherOnline() >= t) {
 		delay = Global::NotifyDefaultDelay();
 	}
+//	LOG(("Is online: %1, otherOnline: %2, currentTime: %3, otherNotOld: %4, otherLaterThanMe: %5").arg(Logs::b(isOnline)).arg(cOtherOnline()).arg(t).arg(Logs::b(otherNotOld)).arg(Logs::b(otherLaterThanMe)));
 
 	uint64 when = ms + delay;
 	notifyWhenAlerts[history].insert(when, notifyByFrom);
@@ -1862,7 +1882,7 @@ QImage MainWindow::iconWithCounter(int size, int count, style::color bg, bool sm
 		placeSmallCounter(img, size, count, bg, QPoint(), st::counterColor);
 	} else {
 		QPainter p(&img);
-		p.drawPixmap(size / 2, size / 2, QPixmap::fromImage(iconWithCounter(-size / 2, count, bg, false), Qt::ColorOnly));
+		p.drawPixmap(size / 2, size / 2, App::pixmapFromImageInPlace(iconWithCounter(-size / 2, count, bg, false)));
 	}
 	return img;
 }
@@ -1882,8 +1902,15 @@ void MainWindow::sendPaths() {
 
 void MainWindow::mediaOverviewUpdated(PeerData *peer, MediaOverviewType type) {
 	if (main) main->mediaOverviewUpdated(peer, type);
-	if (!_mediaView || _mediaView->isHidden()) return;
-	_mediaView->mediaOverviewUpdated(peer, type);
+	if (_mediaView && !_mediaView->isHidden()) {
+		_mediaView->mediaOverviewUpdated(peer, type);
+	}
+	if (type != OverviewCount) {
+		Notify::PeerUpdate update(peer);
+		update.flags |= Notify::PeerUpdate::Flag::SharedMediaChanged;
+		update.mediaTypesMask |= (1 << type);
+		Notify::peerUpdatedDelayed(update);
+	}
 }
 
 void MainWindow::documentUpdated(DocumentData *doc) {
@@ -1925,7 +1952,7 @@ PreLaunchWindow *PreLaunchWindowInstance = 0;
 PreLaunchWindow::PreLaunchWindow(QString title) : TWidget(0) {
 	Fonts::start();
 
-	QIcon icon(QPixmap::fromImage(QImage(cPlatform() == dbipMac ? qsl(":/gui/art/iconbig256.png") : qsl(":/gui/art/icon256.png")), Qt::ColorOnly));
+	QIcon icon(App::pixmapFromImageInPlace(QImage(cPlatform() == dbipMac ? qsl(":/gui/art/iconbig256.png") : qsl(":/gui/art/icon256.png"))));
 	if (cPlatform() == dbipLinux32 || cPlatform() == dbipLinux64) {
 		icon = QIcon::fromTheme("telegram", icon);
 	}

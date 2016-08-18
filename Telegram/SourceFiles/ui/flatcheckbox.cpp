@@ -268,7 +268,7 @@ bool Checkbox::checked() const {
 	return _checked;
 }
 
-void Checkbox::setChecked(bool checked) {
+void Checkbox::setChecked(bool checked, NotifyAboutChange notify) {
 	if (_checked != checked) {
 		_checked = checked;
 		if (_checked) {
@@ -277,9 +277,15 @@ void Checkbox::setChecked(bool checked) {
 			a_checked.start(0);
 		}
 		_a_checked.start();
-
-		emit changed();
+		if (notify == NotifyAboutChange::Notify) {
+			emit changed();
+		}
 	}
+}
+
+void Checkbox::finishAnimations() {
+	a_checked.finish();
+	_a_checked.stop();
 }
 
 void Checkbox::step_over(float64 ms, bool timer) {
@@ -341,11 +347,11 @@ void Checkbox::paintEvent(QPaintEvent *e) {
 		} else {
 			p.setBrush(st::white);
 		}
-		p.drawRoundedRect(QRectF(_checkRect).marginsRemoved(QMarginsF(_st.thickness / 2, _st.thickness / 2, _st.thickness / 2, _st.thickness / 2)), st::msgRadius, st::msgRadius);
+		p.drawRoundedRect(QRectF(_checkRect).marginsRemoved(QMarginsF(_st.thickness / 2., _st.thickness / 2., _st.thickness / 2., _st.thickness / 2.)), st::buttonRadius - (_st.thickness / 2.), st::buttonRadius - (_st.thickness / 2.));
 		p.setRenderHint(QPainter::HighQualityAntialiasing, false);
 
 		if (checked > 0) {
-			p.drawSpriteCenter(_checkRect, _st.checkIcon);
+			_st.checkIcon.paint(p, QPoint(0, 0), width());
 		}
 	}
 	if (_checkRect.contains(r)) return;
@@ -479,9 +485,9 @@ void Radiobutton::paintEvent(QPaintEvent *e) {
 		pen.setWidth(_st.thickness);
 		p.setPen(pen);
 		p.setBrush(Qt::NoBrush);
-		//int32 skip = qCeil(_st.thickness / 2);
+		//int32 skip = qCeil(_st.thickness / 2.);
 		//p.drawEllipse(_checkRect.marginsRemoved(QMargins(skip, skip, skip, skip)));
-		p.drawEllipse(QRectF(_checkRect).marginsRemoved(QMarginsF(_st.thickness / 2, _st.thickness / 2, _st.thickness / 2, _st.thickness / 2)));
+		p.drawEllipse(QRectF(_checkRect).marginsRemoved(QMarginsF(_st.thickness / 2., _st.thickness / 2., _st.thickness / 2., _st.thickness / 2.)));
 
 		if (checked > 0) {
 			p.setPen(Qt::NoPen);

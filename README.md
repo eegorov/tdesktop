@@ -11,10 +11,10 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Windows XP - Windows 10 (**not** RT)
 * Mac OS X 10.8 - Mac OS X 10.11
 * Mac OS X 10.6 - Mac OS X 10.7 (separate build)
-* Ubuntu 12.04 - Ubuntu 15.04
+* Ubuntu 12.04 - Ubuntu 16.04
 * Fedora 22
 
-## Third-party libraries
+## Third-party
 
 * Qt 5.3.2 and 5.6.0, slightly patched ([LGPL](http://doc.qt.io/qt-5/lgpl.html))
 * OpenSSL 1.0.1g ([OpenSSL License](https://www.openssl.org/source/license.html))
@@ -24,6 +24,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * liblzma ([public domain](http://tukaani.org/xz/))
 * Google Breakpad ([License](https://chromium.googlesource.com/breakpad/breakpad/+/master/LICENSE))
 * Google Crashpad ([Apache License 2.0](https://chromium.googlesource.com/crashpad/crashpad/+/master/LICENSE))
+* GYP ([BSD license](https://github.com/bnoordhuis/gyp/blob/master/LICENSE))
+* Ninja ([Apache License 2.0](https://github.com/ninja-build/ninja/blob/master/COPYING))
 * OpenAL Soft ([LGPL](http://kcat.strangesoft.net/openal.html))
 * Opus codec ([BSD license](http://www.opus-codec.org/license/))
 * FFmpeg ([LGPL](https://www.ffmpeg.org/legal.html))
@@ -59,7 +61,7 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
   * SourceFiles/art/emoji_150x.png
   * SourceFiles/art/emoji_200x.png
   * SourceFiles/art/emoji_250x.png
-  * SourceFiles/gui/emoji_config.cpp
+  * SourceFiles/ui/emoji_config.cpp
 
 * ### codegen_style
 * ### codegen_numbers

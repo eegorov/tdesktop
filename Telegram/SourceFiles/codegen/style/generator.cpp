@@ -289,7 +289,7 @@ QString Generator::valueAssignmentCode(structure::Value value) const {
 	} break;
 	case Tag::Icon: {
 		auto v(value.Icon());
-		if (v.parts.empty()) return QString();
+		if (v.parts.empty()) return QString("{}");
 
 		QStringList parts;
 		for (const auto &part : v.parts) {
@@ -327,8 +327,11 @@ bool Generator::writeHeaderStyleNamespace() {
 		header_->stream() << "void init_" << baseName_ << "();\n\n";
 		header_->popNamespace();
 	}
+	bool wroteForwardDeclarations = writeStructsForwardDeclarations();
 	if (module_.hasStructs()) {
-		header_->newline();
+		if (!wroteForwardDeclarations) {
+			header_->newline();
+		}
 		if (!writeStructsDefinitions()) {
 			return false;
 		}
@@ -336,6 +339,32 @@ bool Generator::writeHeaderStyleNamespace() {
 
 	header_->popNamespace().newline();
 	return true;
+}
+
+bool Generator::writeStructsForwardDeclarations() {
+	bool hasNoExternalStructs = module_.enumVariables([this](const Variable &value) -> bool {
+		if (value.value.type().tag == structure::TypeTag::Struct) {
+			if (!module_.findStructInModule(value.value.type().name, module_)) {
+				return false;
+			}
+		}
+		return true;
+	});
+	if (hasNoExternalStructs) {
+		return false;
+	}
+
+	header_->newline();
+	bool result = module_.enumVariables([this](const Variable &value) -> bool {
+		if (value.value.type().tag == structure::TypeTag::Struct) {
+			if (!module_.findStructInModule(value.value.type().name, module_)) {
+				header_->stream() << "struct " << value.value.type().name.back() << ";\n";
+			}
+		}
+		return true;
+	});
+	header_->newline();
+	return result;
 }
 
 bool Generator::writeStructsDefinitions() {
@@ -646,6 +675,10 @@ bool Generator::collectUniqueValues() {
 	int iconMaskIndex = 0;
 	std::function<bool(const Variable&)> collector = [this, &collector, &fontFamilyIndex, &iconMaskIndex](const Variable &variable) {
 		auto value = variable.value;
+		if (!value.copyOf().isEmpty()) {
+			return true;
+		}
+
 		switch (value.type().tag) {
 		case Tag::Invalid:
 		case Tag::Int:

@@ -23,6 +23,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "title.h"
 #include "pspecific.h"
 #include "ui/boxshadow.h"
+#include "platform/platform_main_window.h"
 
 class MediaView;
 class TitleWidget;
@@ -123,11 +124,11 @@ typedef QList<NotifyWindow*> NotifyWindows;
 
 class MediaPreviewWidget;
 
-class MainWindow : public PsMainWindow {
+class MainWindow : public Platform::MainWindow {
 	Q_OBJECT
 
 public:
-	MainWindow(QWidget *parent = 0);
+	MainWindow();
 	~MainWindow();
 
 	void init();
@@ -156,7 +157,6 @@ public:
 	void checkAutoLockIn(int msec);
 	void setupIntro(bool anim);
 	void setupMain(bool anim, const MTPUser *user = 0);
-	void getNotifySetting(const MTPInputNotifyPeer &peer, uint32 msWait = 0);
 	void serviceNotification(const QString &msg, const MTPMessageMedia &media = MTP_messageMediaEmpty(), bool force = false);
 	void sendServiceHistoryRequest();
 	void showDelayedServiceMsgs();
@@ -185,7 +185,7 @@ public:
 	void showPhoto(PhotoData *photo, PeerData *item);
 	void showDocument(DocumentData *doc, HistoryItem *item);
 
-	bool historyIsActive() const;
+	bool doWeReadServerHistory() const;
 
 	void activate();
 
@@ -249,9 +249,7 @@ public:
 	PeerData *ui_getPeerForMouseAction();
 
 public slots:
-
 	void updateIsActive(int timeout = 0);
-	void stateChanged(Qt::WindowState state);
 
 	void checkHistoryActivation();
 
@@ -284,18 +282,22 @@ public slots:
 	void onLogoutSure();
 	void updateGlobalMenu(); // for OS X top menu
 
+	void onReActivate();
+
 	void notifyUpdateAllPhotos();
 
 	void app_activateClickHandler(ClickHandlerPtr handler, Qt::MouseButton button);
 
 signals:
-
 	void resized(const QSize &size);
 	void tempDirCleared(int task);
 	void tempDirClearFailed(int task);
 	void newAuthorization();
 
 	void imageLoaded();
+
+private slots:
+	void onStateChanged(Qt::WindowState state);
 
 private:
 

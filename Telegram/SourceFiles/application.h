@@ -114,6 +114,7 @@ namespace Sandbox {
 	bool isSavingSession();
 
 	void installEventFilter(QObject *filter);
+	void removeEventFilter(QObject *filter);
 
 	void execExternal(const QString &cmd);
 
@@ -159,7 +160,6 @@ public:
 	FileUploader *uploader();
 	void uploadProfilePhoto(const QImage &tosend, const PeerId &peerId);
 	void regPhotoUpdate(const PeerId &peer, const FullMsgId &msgId);
-	void clearPhotoUpdates();
 	bool isPhotoUpdating(const PeerId &peer);
 	void cancelPhotoUpdate(const PeerId &peer);
 
@@ -203,6 +203,8 @@ public slots:
 
 	void call_handleHistoryUpdate();
 	void call_handleUnreadCounterUpdate();
+	void call_handleFileDialogQueue();
+	void call_handleDelayedPeerUpdates();
 
 private:
 

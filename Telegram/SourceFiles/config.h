@@ -100,20 +100,19 @@ enum {
 	// a new message from the same sender is attached to previous within 15 minutes
 	AttachMessageToPreviousSecondsDelta = 900,
 
-	AudioVoiceMsgSimultaneously = 4,
-	AudioSongSimultaneously = 4,
+	AudioSimultaneousLimit = 4,
 	AudioCheckPositionTimeout = 100, // 100ms per check audio pos
 	AudioCheckPositionDelta = 2400, // update position called each 2400 samples
 	AudioFadeTimeout = 7, // 7ms
 	AudioFadeDuration = 500,
 	AudioVoiceMsgSkip = 400, // 200ms
 	AudioVoiceMsgFade = 300, // 300ms
-	AudioPreloadSamples = 5 * 48000, // preload next part if less than 5 seconds remains
+	AudioPreloadSamples = 2 * 48000, // preload next part if less than 5 seconds remains
 	AudioVoiceMsgFrequency = 48000, // 48 kHz
 	AudioVoiceMsgMaxLength = 100 * 60, // 100 minutes
 	AudioVoiceMsgUpdateView = 100, // 100ms
 	AudioVoiceMsgChannels = 2, // stereo
-	AudioVoiceMsgBufferSize = 1024 * 1024, // 1 Mb buffers
+	AudioVoiceMsgBufferSize = 256 * 1024, // 256 Kb buffers (1.3 - 3.0 secs)
 	AudioVoiceMsgInMemory = 2 * 1024 * 1024, // 2 Mb audio is hold in memory and auto loaded
 	AudioPauseDeviceTimeout = 3000, // pause in 3 secs after playing is over
 
@@ -152,6 +151,9 @@ enum {
 	WriteMapTimeout = 1000,
 	SaveDraftTimeout = 1000, // save draft after 1 secs of not changing text
 	SaveDraftAnywayTimeout = 5000, // or save anyway each 5 secs
+	SaveCloudDraftIdleTimeout = 14000, // save draft to the cloud after 14 more seconds
+	SaveCloudDraftTimeout = 1000, // save draft to the cloud with 1 sec extra delay
+	SaveDraftBeforeQuitTimeout = 1500, // give the app 1.5 secs to save drafts to cloud when quitting
 
 	SetOnlineAfterActivity = 30, // user with hidden last seen stays online for such amount of seconds in the interface
 
@@ -313,7 +315,6 @@ inline const char *cApiSystemVersion() {
 inline QString cApiAppVersion() {
 	return QString::number(AppVersion);
 }
-static const char *ApiLang = "en";
 
 extern QString gKeyFile;
 inline const QString &cDataFile() {

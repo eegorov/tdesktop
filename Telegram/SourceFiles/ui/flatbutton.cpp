@@ -24,7 +24,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 FlatButton::FlatButton(QWidget *parent, const QString &text, const style::flatButton &st) : Button(parent)
 , _text(text)
 , _st(st)
-, _autoFontPadding(0)
 , a_bg(st.bgColor->c)
 , a_text(st.color->c)
 , _a_appearance(animation(this, &FlatButton::step_appearance))
@@ -63,33 +62,8 @@ void FlatButton::setWidth(int32 w) {
 	resize(_st.width, height());
 }
 
-void FlatButton::setAutoFontSize(int32 padding, const QString &txt) {
-	_autoFontPadding = padding;
-	if (_autoFontPadding) {
-		_textForAutoSize = txt;
-		resizeEvent(0);
-	} else {
-		_textForAutoSize = QString();
-		_autoFont = style::font();
-	}
-	update();
-}
-
 int32 FlatButton::textWidth() const {
 	return _st.font->width(_text);
-}
-
-void FlatButton::resizeEvent(QResizeEvent *e) {
-	if (_autoFontPadding) {
-		_autoFont = _st.font;
-		for (int32 s = _st.font->f.pixelSize(); s >= st::fsize; --s) {
-			_autoFont = style::font(s, _st.font->flags(), _st.font->family());
-			if (2 * _autoFontPadding + _autoFont->width(_textForAutoSize) <= width()) {
-				break;
-			}
-		}
-	}
-	return Button::resizeEvent(e);
 }
 
 void FlatButton::step_appearance(float64 ms, bool timer) {
@@ -127,14 +101,21 @@ void FlatButton::paintEvent(QPaintEvent *e) {
 	QRect r(0, height() - _st.height, width(), _st.height);
 
 	p.setOpacity(_opacity);
-	p.fillRect(r, a_bg.current());
+	if (_st.radius > 0) {
+		p.setRenderHint(QPainter::HighQualityAntialiasing);
+		p.setPen(Qt::NoPen);
+		p.setBrush(QBrush(a_bg.current()));
+		p.drawRoundedRect(r, _st.radius, _st.radius);
+		p.setRenderHint(QPainter::HighQualityAntialiasing, false);
+	} else {
+		p.fillRect(r, a_bg.current());
+	}
 
-	p.setFont((_autoFont ? _autoFont : ((_state & StateOver) ? _st.overFont : _st.font))->f);
+	p.setFont((_state & StateOver) ? _st.overFont : _st.font);
 	p.setRenderHint(QPainter::TextAntialiasing);
 	p.setPen(a_text.current());
 
 	int32 top = (_state & StateOver) ? ((_state & StateDown) ? _st.downTextTop : _st.overTextTop) : _st.textTop;
-	if (_autoFont) top += (_st.font->height - _autoFont->height) / 2;
 	r.setTop(top);
 
 	p.drawText(r, _text, style::al_top);
@@ -335,10 +316,10 @@ void EmojiButton::paintEvent(QPaintEvent *e) {
 
 void EmojiButton::setLoading(bool loading) {
 	if (_loading != loading) {
-		EnsureAnimation(a_loading, _loading ? 1. : 0., func(this, &EmojiButton::update));
-		a_loading.start(loading ? 1. : 0., st::emojiCircleDuration);
 		_loading = loading;
-		if (_loading) {
+		auto from = loading ? 0. : 1., to = loading ? 1. : 0.;
+		START_ANIMATION(a_loading, func(this, &EmojiButton::updateCallback), from, to, st::emojiCircleDuration, anim::linear);
+		if (loading) {
 			_a_loading.start();
 		} else {
 			_a_loading.stop();
@@ -346,7 +327,7 @@ void EmojiButton::setLoading(bool loading) {
 	}
 }
 
-BoxButton::BoxButton(QWidget *parent, const QString &text, const style::BoxButton &st) : Button(parent)
+BoxButton::BoxButton(QWidget *parent, const QString &text, const style::RoundButton &st) : Button(parent)
 , _text(text.toUpper())
 , _fullText(text.toUpper())
 , _textWidth(st.font->width(_text))
@@ -368,6 +349,7 @@ void BoxButton::setText(const QString &text) {
 	_fullText = text;
 	_textWidth = _st.font->width(_text);
 	resizeToText();
+	update();
 }
 
 void BoxButton::resizeToText() {
@@ -390,14 +372,16 @@ void BoxButton::paintEvent(QPaintEvent *e) {
 	float64 o = a_textBgOverOpacity.current();
 	if (o > 0) {
 		p.setOpacity(o);
-		App::roundRect(p, rect(), _st.textBgOver);
+		App::roundRect(p, rect(), _st.textBgOver, ImageRoundRadius::Small);
 		p.setOpacity(1);
 		p.setPen(a_textFg.current());
 	} else {
 		p.setPen(_st.textFg);
 	}
 	p.setFont(_st.font);
-	p.drawText((width() - _textWidth) / 2, _st.textTop + _st.font->ascent, _text);
+
+	auto textTop = (_state & StateDown) ? _st.downTextTop : _st.textTop;
+	p.drawText((width() - _textWidth) / 2, textTop + _st.font->ascent, _text);
 }
 
 void BoxButton::step_over(float64 ms, bool timer) {
@@ -419,7 +403,7 @@ void BoxButton::onStateChange(int oldState, ButtonStateChangeSource source) {
 
 	a_textBgOverOpacity.start(textBgOverOpacity);
 	a_textFg.start(textFg->c);
-	if (source == ButtonByUser || source == ButtonByPress) {
+	if (source == ButtonByUser || source == ButtonByPress || true) {
 		_a_over.stop();
 		a_textBgOverOpacity.finish();
 		a_textFg.finish();

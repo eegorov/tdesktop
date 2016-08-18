@@ -23,6 +23,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #include "lang.h"
 #include "inline_bots/inline_bot_layout_item.h"
+#include "observer_peer.h"
 #include "history.h"
 #include "mainwidget.h"
 #include "application.h"
@@ -31,7 +32,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "ui/filedialog.h"
 #include "apiwrap.h"
 #include "boxes/confirmbox.h"
-#include "audio.h"
+#include "media/media_audio.h"
 #include "localstorage.h"
 
 namespace {
@@ -95,22 +96,20 @@ ImagePtr channelDefPhoto(int index) {
 	return channelDefPhotos[index];
 }
 
+using UpdateFlag = Notify::PeerUpdate::Flag;
+
 NotifySettings globalNotifyAll, globalNotifyUsers, globalNotifyChats;
 NotifySettingsPtr globalNotifyAllPtr = UnknownNotifySettings, globalNotifyUsersPtr = UnknownNotifySettings, globalNotifyChatsPtr = UnknownNotifySettings;
 
 PeerData::PeerData(const PeerId &id) : id(id)
-, loadedStatus(NotLoaded)
 , colorIndex(peerColorIndex(id))
 , color(peerColor(colorIndex))
-, photoId(UnknownPeerPhotoId)
-, nameVersion(0)
-, notify(UnknownNotifySettings)
 , _userpic(isUser() ? userDefPhoto(colorIndex) : ((isChat() || isMegagroup()) ? chatDefPhoto(colorIndex) : channelDefPhoto(colorIndex))) {
-	if (!peerIsUser(id) && !peerIsChannel(id)) updateName(QString(), QString(), QString());
+	nameText.setText(st::msgNameFont, QString(), _textNameOptions);
 }
 
-void PeerData::updateName(const QString &newName, const QString &newNameOrPhone, const QString &newUsername) {
-	if (name == newName && nameVersion > 0) {
+void PeerData::updateNameDelayed(const QString &newName, const QString &newNameOrPhone, const QString &newUsername) {
+	if (name == newName) {
 		if (isUser()) {
 			if (asUser()->nameOrPhone == newNameOrPhone && asUser()->username == newUsername) {
 				return;
@@ -127,8 +126,17 @@ void PeerData::updateName(const QString &newName, const QString &newNameOrPhone,
 	++nameVersion;
 	name = newName;
 	nameText.setText(st::msgNameFont, name, _textNameOptions);
+
+	Notify::PeerUpdate update(this);
+	update.flags |= UpdateFlag::NameChanged;
+	update.oldNames = names;
+	update.oldNameFirstChars = chars;
+
 	if (isUser()) {
-		asUser()->username = newUsername;
+		if (asUser()->username != newUsername) {
+			asUser()->username = newUsername;
+			update.flags |= UpdateFlag::UsernameChanged;
+		}
 		asUser()->setNameOrPhone(newNameOrPhone);
 	} else if (isChannel()) {
 		if (asChannel()->username != newUsername) {
@@ -138,19 +146,14 @@ void PeerData::updateName(const QString &newName, const QString &newNameOrPhone,
 			} else {
 				asChannel()->flags |= MTPDchannel::Flag::f_username;
 			}
-			if (App::main()) {
-				App::main()->peerUsernameChanged(this);
-			}
+			update.flags |= UpdateFlag::UsernameChanged;
 		}
 	}
-
-	Names oldNames = names;
-	NameFirstChars oldChars = chars;
 	fillNames();
-
 	if (App::main()) {
-		emit App::main()->peerNameChanged(this, oldNames, oldChars);
+		emit App::main()->peerNameChanged(this, update.oldNames, update.oldNameFirstChars);
 	}
+	Notify::peerUpdatedDelayed(update);
 }
 
 void PeerData::setUserpic(ImagePtr userpic) {
@@ -182,12 +185,12 @@ StorageKey PeerData::userpicUniqueKey() const {
 	return storageKey(photoLoc);
 }
 
-void PeerData::saveUserpic(const QString &path) const {
-	currentUserpic()->pixCircled().save(path, "PNG");
+void PeerData::saveUserpic(const QString &path, int size) const {
+	currentUserpic()->pixRounded(ImageRoundRadius::Small, size, size).save(path, "PNG");
 }
 
 QPixmap PeerData::genUserpic(int size) const {
-	return currentUserpic()->pixCircled(size, size);
+	return currentUserpic()->pixRounded(ImageRoundRadius::Small, size, size);
 }
 
 const Text &BotCommand::descriptionText() const {
@@ -195,6 +198,10 @@ const Text &BotCommand::descriptionText() const {
 		_descriptionText.setText(st::mentionFont, _description, _textNameOptions);
 	}
 	return _descriptionText;
+}
+
+bool UserData::canShareThisContact() const {
+	return canShareThisContactFast() || !App::phoneFromSharedContact(peerToUser(id)).isEmpty();
 }
 
 void UserData::setPhoto(const MTPUserProfilePhoto &p) { // see Local::readPeer as well
@@ -213,7 +220,7 @@ void UserData::setPhoto(const MTPUserProfilePhoto &p) { // see Local::readPeer a
 		newPhotoId = 0;
 		if (id == ServiceUserId) {
 			if (_userpic.v() == userDefPhoto(colorIndex).v()) {
-				newPhoto = ImagePtr(QPixmap::fromImage(App::wnd()->iconLarge().scaledToWidth(160, Qt::SmoothTransformation), Qt::ColorOnly), "PNG");
+				newPhoto = ImagePtr(App::pixmapFromImageInPlace(App::wnd()->iconLarge().scaledToWidth(160, Qt::SmoothTransformation)), "PNG");
 			}
 		} else {
 			newPhoto = userDefPhoto(colorIndex);
@@ -228,6 +235,7 @@ void UserData::setPhoto(const MTPUserProfilePhoto &p) { // see Local::readPeer a
 		if (App::main()) {
 			emit App::main()->peerPhotoChanged(this);
 		}
+		Notify::peerUpdatedDelayed(this, UpdateFlag::PhotoChanged);
 	}
 }
 
@@ -253,29 +261,35 @@ void PeerData::fillNames() {
 	}
 }
 
-void UserData::setName(const QString &first, const QString &last, const QString &phoneName, const QString &usern) {
-	bool updName = !first.isEmpty() || !last.isEmpty(), updUsername = (username != usern);
+bool UserData::setAbout(const QString &newAbout) {
+	if (_about == newAbout) {
+		return false;
+	}
+	_about = newAbout;
+	Notify::peerUpdatedDelayed(this, UpdateFlag::AboutChanged);
+	return true;
+}
 
-	if (updName && first.trimmed().isEmpty()) {
-		firstName = last;
+void UserData::setName(const QString &newFirstName, const QString &newLastName, const QString &newPhoneName, const QString &newUsername) {
+	bool changeName = !newFirstName.isEmpty() || !newLastName.isEmpty();
+
+	QString newFullName;
+	if (changeName && newFirstName.trimmed().isEmpty()) {
+		firstName = newLastName;
 		lastName = QString();
-		updateName(firstName, phoneName, usern);
+		newFullName = firstName;
 	} else {
-		if (updName) {
-			firstName = first;
-			lastName = last;
+		if (changeName) {
+			firstName = newFirstName;
+			lastName = newLastName;
 		}
-		updateName(lastName.isEmpty() ? firstName : lng_full_name(lt_first_name, firstName, lt_last_name, lastName), phoneName, usern);
+		newFullName = lastName.isEmpty() ? firstName : lng_full_name(lt_first_name, firstName, lt_last_name, lastName);
 	}
-	if (updUsername) {
-		if (App::main()) {
-			App::main()->peerUsernameChanged(this);
-		}
-	}
+	updateNameDelayed(newFullName, newPhoneName, newUsername);
 }
 
 void UserData::setPhone(const QString &newPhone) {
-	phone = newPhone;
+	_phone = newPhone;
 }
 
 void UserData::setBotInfoVersion(int version) {
@@ -285,12 +299,11 @@ void UserData::setBotInfoVersion(int version) {
 				botInfo->commands.clear();
 				Notify::botCommandsChanged(this);
 			}
-			delete botInfo;
-			botInfo = 0;
+			botInfo = nullptr;
 			Notify::userIsBotChanged(this);
 		}
 	} else if (!botInfo) {
-		botInfo = new BotInfo();
+		botInfo = std_::make_unique<BotInfo>();
 		botInfo->version = version;
 		Notify::userIsBotChanged(this);
 	} else if (botInfo->version < version) {
@@ -359,16 +372,24 @@ void UserData::setNameOrPhone(const QString &newNameOrPhone) {
 	}
 }
 
-void UserData::madeAction() {
-	if (botInfo || isServiceUser(id)) return;
+void UserData::madeAction(TimeId when) {
+	if (botInfo || isServiceUser(id) || when <= 0) return;
 
-	int32 t = unixtime();
-	if (onlineTill <= 0 && -onlineTill < t) {
-		onlineTill = -t - SetOnlineAfterActivity;
+	if (onlineTill <= 0 && -onlineTill < when) {
+		onlineTill = -when - SetOnlineAfterActivity;
 		App::markPeerUpdated(this);
-	} else if (onlineTill > 0 && onlineTill < t + 1) {
-		onlineTill = t + SetOnlineAfterActivity;
+		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::UserOnlineChanged);
+	} else if (onlineTill > 0 && onlineTill < when + 1) {
+		onlineTill = when + SetOnlineAfterActivity;
 		App::markPeerUpdated(this);
+		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::UserOnlineChanged);
+	}
+}
+
+void UserData::setBlockStatus(BlockStatus blockStatus) {
+	if (blockStatus != _blockStatus) {
+		_blockStatus = blockStatus;
+		Notify::peerUpdatedDelayed(this, UpdateFlag::UserIsBlocked);
 	}
 }
 
@@ -397,7 +418,34 @@ void ChatData::setPhoto(const MTPChatPhoto &p, const PhotoId &phId) { // see Loc
 		photoId = newPhotoId;
 		setUserpic(newPhoto);
 		photoLoc = newPhotoLoc;
-		emit App::main()->peerPhotoChanged(this);
+		if (App::main()) {
+			emit App::main()->peerPhotoChanged(this);
+		}
+		Notify::peerUpdatedDelayed(this, UpdateFlag::PhotoChanged);
+	}
+}
+
+void ChatData::setName(const QString &newName) {
+	updateNameDelayed(newName.isEmpty() ? name : newName, QString(), QString());
+}
+
+void ChatData::invalidateParticipants() {
+	auto wasCanEdit = canEdit();
+	participants = ChatData::Participants();
+	admins = ChatData::Admins();
+	flags &= ~MTPDchat::Flag::f_admin;
+	invitedByMe = ChatData::InvitedByMe();
+	botStatus = 0;
+	if (wasCanEdit != canEdit()) {
+		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::ChatCanEdit);
+	}
+	Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::MembersChanged | Notify::PeerUpdate::Flag::AdminsChanged);
+}
+
+void ChatData::setInviteLink(const QString &newInviteLink) {
+	if (newInviteLink != _inviteLink) {
+		_inviteLink = newInviteLink;
+		Notify::peerUpdatedDelayed(this, UpdateFlag::InviteLinkChanged);
 	}
 }
 
@@ -426,14 +474,15 @@ void ChannelData::setPhoto(const MTPChatPhoto &p, const PhotoId &phId) { // see 
 		photoId = newPhotoId;
 		setUserpic(newPhoto);
 		photoLoc = newPhotoLoc;
-		if (App::main()) emit App::main()->peerPhotoChanged(this);
+		if (App::main()) {
+			emit App::main()->peerPhotoChanged(this);
+		}
+		Notify::peerUpdatedDelayed(this, UpdateFlag::PhotoChanged);
 	}
 }
 
-void ChannelData::setName(const QString &newName, const QString &usern) {
-	bool updName = !newName.isEmpty(), updUsername = (username != usern);
-
-	updateName(newName.isEmpty() ? name : newName, QString(), usern);
+void ChannelData::setName(const QString &newName, const QString &newUsername) {
+	updateNameDelayed(newName.isEmpty() ? name : newName, QString(), newUsername);
 }
 
 void ChannelData::updateFull(bool force) {
@@ -449,21 +498,58 @@ void ChannelData::fullUpdated() {
 	_lastFullUpdate = getms(true);
 }
 
+bool ChannelData::setAbout(const QString &newAbout) {
+	if (_about == newAbout) {
+		return false;
+	}
+	_about = newAbout;
+	Notify::peerUpdatedDelayed(this, UpdateFlag::AboutChanged);
+	return true;
+}
+
+void ChannelData::setInviteLink(const QString &newInviteLink) {
+	if (newInviteLink != _inviteLink) {
+		_inviteLink = newInviteLink;
+		Notify::peerUpdatedDelayed(this, UpdateFlag::InviteLinkChanged);
+	}
+}
+
+void ChannelData::setMembersCount(int newMembersCount) {
+	if (_membersCount != newMembersCount) {
+		if (isMegagroup() && !mgInfo->lastParticipants.isEmpty()) {
+			mgInfo->lastParticipantsStatus |= MegagroupInfo::LastParticipantsCountOutdated;
+			mgInfo->lastParticipantsCount = membersCount();
+		}
+		_membersCount = newMembersCount;
+		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::MembersChanged);
+	}
+}
+
+void ChannelData::setAdminsCount(int newAdminsCount) {
+	if (_adminsCount != newAdminsCount) {
+		_adminsCount = newAdminsCount;
+		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::AdminsChanged);
+	}
+}
+
 void ChannelData::flagsUpdated() {
 	if (isMegagroup()) {
 		if (!mgInfo) {
 			mgInfo = new MegagroupInfo();
 		}
-		if (History *h = App::historyLoaded(id)) {
-			if (h->asChannelHistory()->onlyImportant()) {
-				MsgId fixInScrollMsgId = 0;
-				int32 fixInScrollMsgTop = 0;
-				h->asChannelHistory()->getSwitchReadyFor(SwitchAtTopMsgId, fixInScrollMsgId, fixInScrollMsgTop);
-			}
-		}
 	} else if (mgInfo) {
 		delete mgInfo;
-		mgInfo = 0;
+		mgInfo = nullptr;
+	}
+}
+
+void ChannelData::selfAdminUpdated() {
+	if (isMegagroup()) {
+		if (amEditor()) {
+			mgInfo->lastAdmins.insert(App::self());
+		} else {
+			mgInfo->lastAdmins.remove(App::self());
+		}
 	}
 }
 
@@ -803,13 +889,13 @@ bool StickerData::setInstalled() const {
 	switch (set.type()) {
 	case mtpc_inputStickerSetID: {
 		auto it = Global::StickerSets().constFind(set.c_inputStickerSetID().vid.v);
-		return (it != Global::StickerSets().cend()) && !(it->flags & MTPDstickerSet::Flag::f_disabled);
+		return (it != Global::StickerSets().cend()) && !(it->flags & MTPDstickerSet::Flag::f_archived) && (it->flags & MTPDstickerSet::Flag::f_installed);
 	} break;
 	case mtpc_inputStickerSetShortName: {
 		QString name = qs(set.c_inputStickerSetShortName().vshort_name).toLower();
 		for (auto it = Global::StickerSets().cbegin(), e = Global::StickerSets().cend(); it != e; ++it) {
 			if (it->shortName.toLower() == name) {
-				return !(it->flags & MTPDstickerSet::Flag::f_disabled);
+				return !(it->flags & MTPDstickerSet::Flag::f_archived) && (it->flags & MTPDstickerSet::Flag::f_installed);
 			}
 		}
 	} break;
@@ -825,12 +911,13 @@ QString documentSaveFilename(const DocumentData *data, bool forceSavingAs = fals
 	if (data->voice()) {
 		bool mp3 = (data->mime == qstr("audio/mp3"));
 		name = already.isEmpty() ? (mp3 ? qsl(".mp3") : qsl(".ogg")) : already;
-		filter = mp3 ? qsl("MP3 Audio (*.mp3);;All files (*.*)") : qsl("OGG Opus Audio (*.ogg);;All files (*.*)");
+		filter = mp3 ? qsl("MP3 Audio (*.mp3);;") : qsl("OGG Opus Audio (*.ogg);;");
+		filter += filedialogAllFilesFilter();
 		caption = lang(lng_save_audio);
 		prefix = qsl("audio");
 	} else if (data->isVideo()) {
 		name = already.isEmpty() ? qsl(".mov") : already;
-		filter = qsl("MOV Video (*.mov);;All files (*.*)");
+		filter = qsl("MOV Video (*.mov);;") + filedialogAllFilesFilter();
 		caption = lang(lng_save_video);
 		prefix = qsl("video");
 	} else {
@@ -841,7 +928,7 @@ QString documentSaveFilename(const DocumentData *data, bool forceSavingAs = fals
 		if (pattern.isEmpty()) {
 			filter = QString();
 		} else {
-			filter = mimeType.filterString() + qsl(";;All files (*.*)");
+			filter = mimeType.filterString() + qsl(";;") + filedialogAllFilesFilter();
 		}
 		caption = lang(data->song() ? lng_save_audio_file : lng_save_file);
 		prefix = qsl("doc");
@@ -860,15 +947,15 @@ void DocumentOpenClickHandler::doOpen(DocumentData *data, ActionOnLoad action) {
 	}
 	bool playVoice = data->voice() && audioPlayer();
 	bool playMusic = data->song() && audioPlayer();
+	bool playVideo = data->isVideo() && audioPlayer();
 	bool playAnimation = data->isAnimation() && item && item->getMedia();
 	const FileLocation &location(data->location(true));
-	if (!location.isEmpty() || (!data->data().isEmpty() && (playVoice || playMusic || playAnimation))) {
+	if (!location.isEmpty() || (!data->data().isEmpty() && (playVoice || playMusic || playVideo || playAnimation))) {
 		if (playVoice) {
 			AudioMsgId playing;
-			AudioPlayerState playingState = AudioPlayerStopped;
-			audioPlayer()->currentState(&playing, &playingState);
-			if (playing == AudioMsgId(data, msgId) && !(playingState & AudioPlayerStoppedMask) && playingState != AudioPlayerFinishing) {
-				audioPlayer()->pauseresume(OverviewVoiceFiles);
+			auto playbackState = audioPlayer()->currentState(&playing, AudioMsgId::Type::Voice);
+			if (playing == AudioMsgId(data, msgId) && !(playbackState.state & AudioPlayerStoppedMask) && playbackState.state != AudioPlayerFinishing) {
+				audioPlayer()->pauseresume(AudioMsgId::Type::Voice);
 			} else {
 				AudioMsgId audio(data, msgId);
 				audioPlayer()->play(audio);
@@ -878,18 +965,35 @@ void DocumentOpenClickHandler::doOpen(DocumentData *data, ActionOnLoad action) {
 				}
 			}
 		} else if (playMusic) {
-			SongMsgId playing;
-			AudioPlayerState playingState = AudioPlayerStopped;
-			audioPlayer()->currentState(&playing, &playingState);
-			if (playing == SongMsgId(data, msgId) && !(playingState & AudioPlayerStoppedMask) && playingState != AudioPlayerFinishing) {
-				audioPlayer()->pauseresume(OverviewFiles);
+			AudioMsgId playing;
+			auto playbackState = audioPlayer()->currentState(&playing, AudioMsgId::Type::Song);
+			if (playing == AudioMsgId(data, msgId) && !(playbackState.state & AudioPlayerStoppedMask) && playbackState.state != AudioPlayerFinishing) {
+				audioPlayer()->pauseresume(AudioMsgId::Type::Song);
 			} else {
-				SongMsgId song(data, msgId);
+				AudioMsgId song(data, msgId);
 				audioPlayer()->play(song);
-				if (App::main()) App::main()->documentPlayProgress(song);
+				if (App::main()) App::main()->audioPlayProgress(song);
 			}
-		} else if (data->voice() || data->isVideo()) {
-			psOpenFile(location.name());
+		} else if (playVideo) {
+			if (!data->data().isEmpty()) {
+				App::wnd()->showDocument(data, item);
+			} else if (location.accessEnable()) {
+				App::wnd()->showDocument(data, item);
+				location.accessDisable();
+			} else {
+				auto filepath = location.name();
+				if (documentIsValidMediaFile(filepath)) {
+					psOpenFile(filepath);
+				} else {
+					psShowInFolder(filepath);
+				}
+			}
+			if (App::main()) App::main()->mediaMarkRead(data);
+		} else if (data->voice() || data->song() || data->isVideo()) {
+			auto filepath = location.name();
+			if (documentIsValidMediaFile(filepath)) {
+				psOpenFile(filepath);
+			}
 			if (App::main()) App::main()->mediaMarkRead(data);
 		} else if (data->size < MediaViewImageSizeLimit) {
 			if (!data->data().isEmpty() && playAnimation) {
@@ -992,10 +1096,11 @@ VoiceData::~VoiceData() {
 DocumentAdditionalData::~DocumentAdditionalData() {
 }
 
-DocumentData::DocumentData(DocumentId id, int32 dc, uint64 accessHash, const QString &url, const QVector<MTPDocumentAttribute> &attributes)
+DocumentData::DocumentData(DocumentId id, int32 dc, uint64 accessHash, int32 version, const QString &url, const QVector<MTPDocumentAttribute> &attributes)
 : id(id)
 , _dc(dc)
 , _access(accessHash)
+, _version(version)
 , _url(url) {
 	setattributes(attributes);
 	if (_dc && _access) {
@@ -1004,15 +1109,15 @@ DocumentData::DocumentData(DocumentId id, int32 dc, uint64 accessHash, const QSt
 }
 
 DocumentData *DocumentData::create(DocumentId id) {
-	return new DocumentData(id, 0, 0, QString(), QVector<MTPDocumentAttribute>());
+	return new DocumentData(id, 0, 0, 0, QString(), QVector<MTPDocumentAttribute>());
 }
 
-DocumentData *DocumentData::create(DocumentId id, int32 dc, uint64 accessHash, const QVector<MTPDocumentAttribute> &attributes) {
-	return new DocumentData(id, dc, accessHash, QString(), attributes);
+DocumentData *DocumentData::create(DocumentId id, int32 dc, uint64 accessHash, int32 version, const QVector<MTPDocumentAttribute> &attributes) {
+	return new DocumentData(id, dc, accessHash, version, QString(), attributes);
 }
 
 DocumentData *DocumentData::create(DocumentId id, const QString &url, const QVector<MTPDocumentAttribute> &attributes) {
-	return new DocumentData(id, 0, 0, url, attributes);
+	return new DocumentData(id, 0, 0, 0, url, attributes);
 }
 
 void DocumentData::setattributes(const QVector<MTPDocumentAttribute> &attributes) {
@@ -1144,10 +1249,9 @@ void DocumentData::performActionOnLoad() {
 	if (playVoice) {
 		if (loaded()) {
 			AudioMsgId playing;
-			AudioPlayerState state = AudioPlayerStopped;
-			audioPlayer()->currentState(&playing, &state);
-			if (playing == AudioMsgId(this, _actionOnLoadMsgId) && !(state & AudioPlayerStoppedMask) && state != AudioPlayerFinishing) {
-				audioPlayer()->pauseresume(OverviewVoiceFiles);
+			auto playbackState = audioPlayer()->currentState(&playing, AudioMsgId::Type::Voice);
+			if (playing == AudioMsgId(this, _actionOnLoadMsgId) && !(playbackState.state & AudioPlayerStoppedMask) && playbackState.state != AudioPlayerFinishing) {
+				audioPlayer()->pauseresume(AudioMsgId::Type::Voice);
 			} else {
 				audioPlayer()->play(AudioMsgId(this, _actionOnLoadMsgId));
 				if (App::main()) App::main()->mediaMarkRead(this);
@@ -1155,15 +1259,14 @@ void DocumentData::performActionOnLoad() {
 		}
 	} else if (playMusic) {
 		if (loaded()) {
-			SongMsgId playing;
-			AudioPlayerState playingState = AudioPlayerStopped;
-			audioPlayer()->currentState(&playing, &playingState);
-			if (playing == SongMsgId(this, _actionOnLoadMsgId) && !(playingState & AudioPlayerStoppedMask) && playingState != AudioPlayerFinishing) {
-				audioPlayer()->pauseresume(OverviewFiles);
+			AudioMsgId playing;
+			auto playbackState = audioPlayer()->currentState(&playing, AudioMsgId::Type::Song);
+			if (playing == AudioMsgId(this, _actionOnLoadMsgId) && !(playbackState.state & AudioPlayerStoppedMask) && playbackState.state != AudioPlayerFinishing) {
+				audioPlayer()->pauseresume(AudioMsgId::Type::Song);
 			} else {
-				SongMsgId song(this, _actionOnLoadMsgId);
+				AudioMsgId song(this, _actionOnLoadMsgId);
 				audioPlayer()->play(song);
-				if (App::main()) App::main()->documentPlayProgress(song);
+				if (App::main()) App::main()->audioPlayProgress(song);
 			}
 		}
 	} else if (playAnimation) {
@@ -1183,8 +1286,10 @@ void DocumentData::performActionOnLoad() {
 				psOpenFile(already, true);
 			}
 		} else if (_actionOnLoad == ActionOnLoadOpen || _actionOnLoad == ActionOnLoadPlayInline) {
-			if (voice() || isVideo()) {
-				psOpenFile(already);
+			if (voice() || song() || isVideo()) {
+				if (documentIsValidMediaFile(already)) {
+					psOpenFile(already);
+				}
 				if (App::main()) App::main()->mediaMarkRead(this);
 			} else if (loc.accessEnable()) {
 				if (showImage && QImageReader(loc.name()).canRead()) {
@@ -1293,7 +1398,7 @@ void DocumentData::save(const QString &toFile, ActionOnLoad action, const FullMs
 		if (!_access && !_url.isEmpty()) {
 			_loader = new webFileLoader(_url, toFile, fromCloud, autoLoading);
 		} else {
-			_loader = new mtpFileLoader(_dc, id, _access, locationType(), toFile, size, (saveToCache() ? LoadToCacheAsWell : LoadToFileOnly), fromCloud, autoLoading);
+			_loader = new mtpFileLoader(_dc, id, _access, _version, locationType(), toFile, size, (saveToCache() ? LoadToCacheAsWell : LoadToFileOnly), fromCloud, autoLoading);
 		}
 		_loader->connect(_loader, SIGNAL(progress(FileLoader*)), App::main(), SLOT(documentLoadProgress(FileLoader*)));
 		_loader->connect(_loader, SIGNAL(failed(FileLoader*,bool)), App::main(), SLOT(documentLoadFailed(FileLoader*,bool)));
@@ -1434,6 +1539,22 @@ void DocumentData::recountIsImage() {
 	_duration = fileIsImage(name, mime) ? 1 : -1; // hack
 }
 
+bool DocumentData::setRemoteVersion(int32 version) {
+	if (_version == version) {
+		return false;
+	}
+	_version = version;
+	_location = FileLocation();
+	_data = QByteArray();
+	status = FileReady;
+	if (loading()) {
+		_loader->deleteLater();
+		_loader->stop();
+		_loader = nullptr;
+	}
+	return true;
+}
+
 void DocumentData::setRemoteLocation(int32 dc, uint64 access) {
 	_dc = dc;
 	_access = access;
@@ -1502,7 +1623,7 @@ void PeerOpenClickHandler::onClickImpl() const {
 				Ui::showPeerHistory(peer(), ShowAtUnreadMsgId);
 			}
 		} else {
-			App::main()->showPeerProfile(peer());
+			Ui::showPeerProfile(peer());
 		}
 	}
 }

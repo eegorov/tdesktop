@@ -105,9 +105,10 @@ void FileLoader::readImage(const QSize &shrinkBox) const {
 	QImage image = App::readImage(_data, &format, false);
 	if (!image.isNull()) {
 		if (!shrinkBox.isEmpty() && (image.width() > shrinkBox.width() || image.height() > shrinkBox.height())) {
-			image = image.scaled(shrinkBox, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+			_imagePixmap = App::pixmapFromImageInPlace(image.scaled(shrinkBox, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+		} else {
+			_imagePixmap = App::pixmapFromImageInPlace(std_::move(image));
 		}
-		_imagePixmap = QPixmap::fromImage(image, Qt::ColorOnly);
 		_imageFormat = format;
 	}
 }
@@ -208,6 +209,7 @@ void FileLoader::localLoaded(const StorageImageSaved &result, const QByteArray &
 	}
 	emit App::wnd()->imageLoaded();
 	emit progress(this);
+	FileDownload::internal::notifyImageLoaded();
 	loadNext();
 }
 
@@ -349,13 +351,8 @@ void FileLoader::startLoading(bool loadFirst, bool prior) {
 
 mtpFileLoader::mtpFileLoader(const StorageImageLocation *location, int32 size, LoadFromCloudSetting fromCloud, bool autoLoading)
 : FileLoader(QString(), size, UnknownFileLocation, LoadToCacheAsWell, fromCloud, autoLoading)
-, _lastComplete(false)
-, _skippedBytes(0)
-, _nextRequestOffset(0)
 , _dc(location->dc())
-, _location(location)
-, _id(0)
-, _access(0) {
+, _location(location) {
 	LoaderQueues::iterator i = queues.find(MTP::dldDcId(_dc, 0));
 	if (i == queues.cend()) {
 		i = queues.insert(MTP::dldDcId(_dc, 0), FileLoaderQueue(MaxFileQueries));
@@ -363,15 +360,12 @@ mtpFileLoader::mtpFileLoader(const StorageImageLocation *location, int32 size, L
 	_queue = &i.value();
 }
 
-mtpFileLoader::mtpFileLoader(int32 dc, const uint64 &id, const uint64 &access, LocationType type, const QString &to, int32 size, LoadToCacheSetting toCache, LoadFromCloudSetting fromCloud, bool autoLoading)
+mtpFileLoader::mtpFileLoader(int32 dc, const uint64 &id, const uint64 &access, int32 version, LocationType type, const QString &to, int32 size, LoadToCacheSetting toCache, LoadFromCloudSetting fromCloud, bool autoLoading)
 : FileLoader(to, size, type, toCache, fromCloud, autoLoading)
-, _lastComplete(false)
-, _skippedBytes(0)
-, _nextRequestOffset(0)
 , _dc(dc)
-, _location(0)
 , _id(id)
-, _access(access) {
+, _access(access)
+, _version(version) {
 	LoaderQueues::iterator i = queues.find(MTP::dldDcId(_dc, 0));
 	if (i == queues.cend()) {
 		i = queues.insert(MTP::dldDcId(_dc, 0), FileLoaderQueue(MaxFileQueries));
@@ -420,7 +414,7 @@ bool mtpFileLoader::loadPart() {
 		switch (_locationType) {
 		case VideoFileLocation:
 		case AudioFileLocation:
-		case DocumentFileLocation: loc = MTP_inputDocumentFileLocation(MTP_long(_id), MTP_long(_access)); break;
+		case DocumentFileLocation: loc = MTP_inputDocumentFileLocation(MTP_long(_id), MTP_long(_access), MTP_int(_version)); break;
 		default: cancel(true); return false; break;
 		}
 	}
@@ -530,7 +524,7 @@ void mtpFileLoader::partLoaded(int32 offset, const MTPupload_File &result, mtpRe
 
 		if (_localStatus == LocalNotFound || _localStatus == LocalFailed) {
 			if (_locationType != UnknownFileLocation) { // audio, video, document
-				MediaKey mkey = mediaKey(_locationType, _dc, _id);
+				MediaKey mkey = mediaKey(_locationType, _dc, _id, _version);
 				if (!_fname.isEmpty()) {
 					Local::writeFileLocation(mkey, FileLocation(mtpToStorageType(_type), _fname));
 				}
@@ -549,6 +543,9 @@ void mtpFileLoader::partLoaded(int32 offset, const MTPupload_File &result, mtpRe
 		if (DebugLogging::FileLoader() && _id) DEBUG_LOG(("FileLoader(%1): not done yet, _lastComplete=%2, _size=%3, _nextRequestOffset=%4, _requests=%5").arg(_id).arg(Logs::b(_lastComplete)).arg(_size).arg(_nextRequestOffset).arg(serializereqs(_requests)));
 	}
 	emit progress(this);
+	if (_complete) {
+		FileDownload::internal::notifyImageLoaded();
+	}
 	loadNext();
 }
 
@@ -589,7 +586,7 @@ bool mtpFileLoader::tryLoadLocal() {
 		_localTaskId = Local::startImageLoad(storageKey(*_location), this);
 	} else {
 		if (_toCache == LoadToCacheAsWell) {
-			MediaKey mkey = mediaKey(_locationType, _dc, _id);
+			MediaKey mkey = mediaKey(_locationType, _dc, _id, _version);
 			if (_locationType == DocumentFileLocation) {
 				_localTaskId = Local::startStickerImageLoad(mkey, this);
 			} else if (_locationType == AudioFileLocation) {
@@ -678,6 +675,7 @@ void webFileLoader::onFinished(const QByteArray &data) {
 		Local::writeWebFile(_url, _data);
 	}
 	emit progress(this);
+	FileDownload::internal::notifyImageLoaded();
 	loadNext();
 }
 
@@ -1088,4 +1086,26 @@ namespace MTP {
 	void clearLoaderPriorities() {
 		++GlobalPriority;
 	}
+}
+
+namespace FileDownload {
+namespace {
+
+using internal::ImageLoadedHandler;
+
+Notify::SimpleObservedEventRegistrator<ImageLoadedHandler> creator(nullptr, nullptr);
+
+} // namespace
+
+namespace internal {
+
+Notify::ConnectionId plainRegisterImageLoadedObserver(ImageLoadedHandler &&handler) {
+	return creator.registerObserver(std_::forward<ImageLoadedHandler>(handler));
+}
+
+void notifyImageLoaded() {
+	creator.notify();
+}
+
+} // namespace internal
 }

@@ -23,6 +23,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #include "application.h"
 #include "localstorage.h"
+#include "platform/platform_file_dialog.h"
 
 void filedialogInit() {
 	if (cDialogLastPath().isEmpty()) {
@@ -69,28 +70,33 @@ void filedialogInit() {
 	}
 }
 
-// multipleFiles: 1 - multi open, 0 - single open, -1 - single save, -2 - select dir
-bool _filedialogGetFiles(QStringList &files, QByteArray &remoteContent, const QString &caption, const QString &filter, int multipleFiles, QString startFile = QString()) {
+namespace FileDialog {
+namespace internal {
 
+bool getFiles(QStringList &files, QByteArray &remoteContent, const QString &caption, const QString &filter, FileDialog::internal::Type type, QString startFile = QString()) {
 	filedialogInit();
+
+	if (Platform::FileDialog::Supported()) {
+		return Platform::FileDialog::Get(files, remoteContent, caption, filter, type, startFile);
+	}
 
 #if defined Q_OS_LINUX || defined Q_OS_MAC // use native
     remoteContent = QByteArray();
 	if (startFile.isEmpty() || startFile.at(0) != '/') {
 		startFile = cDialogLastPath() + '/' + startFile;
 	}
-    QString file;
-    if (multipleFiles >= 0) {
+	QString file;
+	if (type == Type::ReadFiles) {
 		files = QFileDialog::getOpenFileNames(App::wnd() ? App::wnd()->filedialogParent() : 0, caption, startFile, filter);
 		QString path = files.isEmpty() ? QString() : QFileInfo(files.back()).absoluteDir().absolutePath();
 		if (!path.isEmpty() && path != cDialogLastPath()) {
 			cSetDialogLastPath(path);
 			Local::writeUserSettings();
 		}
-        return !files.isEmpty();
-    } else if (multipleFiles < -1) {
+		return !files.isEmpty();
+    } else if (type == Type::ReadFolder) {
 		file = QFileDialog::getExistingDirectory(App::wnd() ? App::wnd()->filedialogParent() : 0, caption, startFile);
-    } else if (multipleFiles < 0) {
+    } else if (type == Type::WriteFile) {
 		file = QFileDialog::getSaveFileName(App::wnd() ? App::wnd()->filedialogParent() : 0, caption, startFile, filter);
     } else {
 		file = QFileDialog::getOpenFileName(App::wnd() ? App::wnd()->filedialogParent() : 0, caption, startFile, filter);
@@ -112,11 +118,11 @@ bool _filedialogGetFiles(QStringList &files, QByteArray &remoteContent, const QS
 	// hack for fast non-native dialog create
 	QFileDialog dialog(App::wnd() ? App::wnd()->filedialogParent() : 0, caption, cDialogHelperPathFinal(), filter);
 
-    dialog.setModal(true);
-	if (multipleFiles >= 0) { // open file or files
-		dialog.setFileMode(multipleFiles ? QFileDialog::ExistingFiles : QFileDialog::ExistingFile);
+	dialog.setModal(true);
+	if (type == Type::ReadFile || type == Type::ReadFiles) {
+		dialog.setFileMode((type == Type::ReadFiles) ? QFileDialog::ExistingFiles : QFileDialog::ExistingFile);
 		dialog.setAcceptMode(QFileDialog::AcceptOpen);
-	} else if (multipleFiles < -1) { // save dir
+	} else if (type == Type::ReadFolder) { // save dir
 		dialog.setAcceptMode(QFileDialog::AcceptOpen);
 		dialog.setFileMode(QFileDialog::Directory);
 		dialog.setOption(QFileDialog::ShowDirsOnly);
@@ -127,7 +133,7 @@ bool _filedialogGetFiles(QStringList &files, QByteArray &remoteContent, const QS
 	dialog.show();
 
 	if (!cDialogLastPath().isEmpty()) dialog.setDirectory(cDialogLastPath());
-	if (multipleFiles == -1) {
+	if (type == Type::WriteFile) {
 		QString toSelect(startFile);
 #ifdef Q_OS_WIN
 		int32 lastSlash = toSelect.lastIndexOf('/');
@@ -151,12 +157,12 @@ bool _filedialogGetFiles(QStringList &files, QByteArray &remoteContent, const QS
 	}
 
 	if (res == QDialog::Accepted) {
-		if (multipleFiles > 0) {
+		if (type == Type::ReadFiles) {
 			files = dialog.selectedFiles();
 		} else {
 			files = dialog.selectedFiles().mid(0, 1);
 		}
-		if (multipleFiles >= 0) {
+		if (type == Type::ReadFile || type == Type::ReadFiles) {
 #if defined Q_OS_WIN && !defined Q_OS_WINRT
 			remoteContent = dialog.selectedRemoteContent();
 #endif // Q_OS_WIN && !Q_OS_WINRT
@@ -169,13 +175,16 @@ bool _filedialogGetFiles(QStringList &files, QByteArray &remoteContent, const QS
 	return false;
 }
 
+} // namespace internal
+} // namespace FileDialog
+
 bool filedialogGetOpenFiles(QStringList &files, QByteArray &remoteContent, const QString &caption, const QString &filter) {
-	return _filedialogGetFiles(files, remoteContent, caption, filter, 1);
+	return FileDialog::internal::getFiles(files, remoteContent, caption, filter, FileDialog::internal::Type::ReadFiles);
 }
 
 bool filedialogGetOpenFile(QString &file, QByteArray &remoteContent, const QString &caption, const QString &filter) {
 	QStringList files;
-	bool result = _filedialogGetFiles(files, remoteContent, caption, filter, 0);
+	bool result = FileDialog::internal::getFiles(files, remoteContent, caption, filter, FileDialog::internal::Type::ReadFile);
 	file = files.isEmpty() ? QString() : files.at(0);
 	return result;
 }
@@ -183,7 +192,7 @@ bool filedialogGetOpenFile(QString &file, QByteArray &remoteContent, const QStri
 bool filedialogGetSaveFile(QString &file, const QString &caption, const QString &filter, const QString &startName) {
 	QStringList files;
 	QByteArray remoteContent;
-	bool result = _filedialogGetFiles(files, remoteContent, caption, filter, -1, startName);
+	bool result = FileDialog::internal::getFiles(files, remoteContent, caption, filter, FileDialog::internal::Type::WriteFile, startName);
 	file = files.isEmpty() ? QString() : files.at(0);
 	return result;
 }
@@ -191,7 +200,7 @@ bool filedialogGetSaveFile(QString &file, const QString &caption, const QString 
 bool filedialogGetDir(QString &dir, const QString &caption) {
 	QStringList files;
 	QByteArray remoteContent;
-	bool result = _filedialogGetFiles(files, remoteContent, caption, QString(), -2);
+	bool result = FileDialog::internal::getFiles(files, remoteContent, caption, QString(), FileDialog::internal::Type::ReadFolder);
 	dir = files.isEmpty() ? QString() : files.at(0);
 	return result;
 }
@@ -234,3 +243,148 @@ QString filedialogNextFilename(const QString &name, const QString &cur, const QS
 	}
 	return result;
 }
+
+QString filedialogAllFilesFilter() {
+#ifdef Q_OS_WIN
+	return qsl("All files (*.*)");
+#else // Q_OS_WIN
+	return qsl("All files (*)");
+#endif // Q_OS_WIN
+}
+
+namespace FileDialog {
+namespace {
+
+using internal::QueryUpdateHandler;
+
+struct Query {
+	enum class Type {
+		ReadFile,
+		ReadFiles,
+		WriteFile,
+		ReadFolder,
+	};
+	Query(Type type
+		, const QString &caption = QString()
+		, const QString &filter = QString()
+		, const QString &filePath = QString()) : id(rand_value<QueryId>())
+		, type(type)
+		, caption(caption)
+		, filter(filter)
+		, filePath(filePath) {
+	}
+	QueryId id;
+	Type type;
+	QString caption, filter, filePath;
+};
+
+using QueryList = QList<Query>;
+NeverFreedPointer<QueryList> Queries;
+
+void StartCallback() {
+	Queries.makeIfNull();
+}
+
+void FinishCallback() {
+	Queries.clear();
+}
+
+Notify::SimpleObservedEventRegistrator<QueryUpdateHandler> creator(StartCallback, FinishCallback);
+
+} // namespace
+
+QueryId queryReadFile(const QString &caption, const QString &filter) {
+	t_assert(creator.started());
+
+	Queries->push_back(Query(Query::Type::ReadFile, caption, filter));
+	Global::RefHandleFileDialogQueue().call();
+	return Queries->back().id;
+}
+
+QueryId queryReadFiles(const QString &caption, const QString &filter) {
+	t_assert(creator.started());
+
+	Queries->push_back(Query(Query::Type::ReadFiles, caption, filter));
+	Global::RefHandleFileDialogQueue().call();
+	return Queries->back().id;
+}
+
+QueryId queryWriteFile(const QString &caption, const QString &filter, const QString &filePath) {
+	t_assert(creator.started());
+
+	Queries->push_back(Query(Query::Type::WriteFile, caption, filter, filePath));
+	Global::RefHandleFileDialogQueue().call();
+	return Queries->back().id;
+}
+
+QueryId queryReadFolder(const QString &caption) {
+	t_assert(creator.started());
+
+	Queries->push_back(Query(Query::Type::ReadFolder, caption));
+	Global::RefHandleFileDialogQueue().call();
+	return Queries->back().id;
+}
+
+bool processQuery() {
+	if (!creator.started() || !Global::started() || Queries->isEmpty()) return false;
+
+	auto query = Queries->front();
+	Queries->pop_front();
+
+	QueryUpdate update(query.id);
+
+	switch (query.type) {
+	case Query::Type::ReadFile: {
+		QString file;
+		QByteArray remoteContent;
+		if (filedialogGetOpenFile(file, remoteContent, query.caption, query.filter)) {
+			if (!file.isEmpty()) {
+				update.filePaths.push_back(file);
+			}
+			update.remoteContent = remoteContent;
+		}
+	} break;
+
+	case Query::Type::ReadFiles: {
+		QStringList files;
+		QByteArray remoteContent;
+		if (filedialogGetOpenFiles(files, remoteContent, query.caption, query.filter)) {
+			update.filePaths = files;
+			update.remoteContent = remoteContent;
+		}
+	} break;
+
+	case Query::Type::WriteFile: {
+		QString file;
+		if (filedialogGetSaveFile(file, query.caption, query.filter, query.filePath)) {
+			if (!file.isEmpty()) {
+				update.filePaths.push_back(file);
+			}
+		}
+	} break;
+
+	case Query::Type::ReadFolder: {
+		QString folder;
+		if (filedialogGetDir(folder, query.caption)) {
+			if (!folder.isEmpty()) {
+				update.filePaths.push_back(folder);
+			}
+		}
+	} break;
+	}
+
+	// No one know what happened during filedialogGet*() call in the event loop.
+	if (!creator.started() || !Global::started()) return false;
+
+	creator.notify(update);
+	return true;
+}
+
+namespace internal {
+
+Notify::ConnectionId plainRegisterObserver(QueryUpdateHandler &&handler) {
+	return creator.registerObserver(std_::forward<QueryUpdateHandler>(handler));
+}
+
+} // namespace internal
+} // namespace FileDialog

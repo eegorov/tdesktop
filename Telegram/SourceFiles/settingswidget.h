@@ -23,11 +23,9 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "ui/flatbutton.h"
 #include "ui/flatcheckbox.h"
 #include "sysbuttons.h"
-
-#include <QtWidgets/QWidget>
+#include "core/observer.h"
 
 class MainWindow;
-class Settings;
 
 class Slider : public QWidget {
 	Q_OBJECT
@@ -57,7 +55,11 @@ private:
 
 };
 
-class SettingsInner : public TWidget, public RPCSender {
+namespace Notify {
+struct PeerUpdate;
+} // namespace Notify
+
+class SettingsInner : public TWidget, public RPCSender, public Notify::Observer {
 	Q_OBJECT
 
 public:
@@ -183,11 +185,15 @@ public slots:
 
 	void onUpdateLocalStorage();
 
+private slots:
+	void onSwitchModerateMode();
+
 	void onAskQuestion();
 	void onAskQuestionSure();
 	void onTelegramFAQ();
 
 private:
+	void notifyPeerUpdated(const Notify::PeerUpdate &update);
 
 	void saveError(const QString &str = QString());
 
@@ -281,6 +287,15 @@ private:
 	FlatCheckbox _tileBackground, _adaptiveForWide;
 	bool _needBackgroundUpdate;
 
+	// Radial animation interface.
+	RadialAnimation _radial;
+	float64 radialProgress() const;
+	bool radialLoading() const;
+	QRect radialRect() const;
+	void radialStart();
+	uint64 radialTimeShift() const;
+	void step_radial(uint64 ms, bool timer);
+
 	// advanced
 	LinkButton _passcodeEdit, _passcodeTurnOff, _autoLock;
 	QString _autoLockText;
@@ -332,7 +347,6 @@ public:
 	void updateDisplayNotify();
 
 	void rpcClear();
-	void usernameChanged();
 
 	void setInnerFocus();
 	void needBackgroundUpdate(bool tile);

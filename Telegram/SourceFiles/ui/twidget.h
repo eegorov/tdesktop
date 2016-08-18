@@ -127,9 +127,9 @@ return qobject_cast<TWidget*>(parentWidget()); \
 const TWidget *tparent() const { \
 	return qobject_cast<const TWidget*>(parentWidget()); \
 } \
-virtual void leaveToChildEvent(QEvent *e) { /* e -- from enterEvent() of child TWidget */ \
+virtual void leaveToChildEvent(QEvent *e, QWidget *child) { /* e -- from enterEvent() of child TWidget */ \
 } \
-virtual void enterFromChildEvent(QEvent *e) { /* e -- from leaveEvent() of child TWidget */ \
+virtual void enterFromChildEvent(QEvent *e, QWidget *child) { /* e -- from leaveEvent() of child TWidget */ \
 } \
 void moveToLeft(int x, int y, int outerw = 0) { \
 	move(rtl() ? ((outerw > 0 ? outerw : parentWidget()->width()) - x - width()) : x, y); \
@@ -158,13 +158,13 @@ void rtlupdate(int x, int y, int w, int h) { \
 protected: \
 void enterEvent(QEvent *e) override { \
 	TWidget *p(tparent()); \
-	if (p) p->leaveToChildEvent(e); \
-	return QWidget::enterEvent(e); \
+	if (p) p->leaveToChildEvent(e, this); \
+	return enterEventHook(e); \
 } \
 void leaveEvent(QEvent *e) override { \
 	TWidget *p(tparent()); \
-	if (p) p->enterFromChildEvent(e); \
-	return QWidget::leaveEvent(e); \
+	if (p) p->enterFromChildEvent(e, this); \
+	return leaveEventHook(e); \
 }
 
 class TWidget : public QWidget {
@@ -184,6 +184,39 @@ public:
 
 	bool inFocusChain() const;
 
+	void hideChildren() {
+		for (auto child : children()) {
+			if (auto widget = qobject_cast<QWidget*>(child)) {
+				widget->hide();
+			}
+		}
+	}
+	void showChildren() {
+		for (auto child : children()) {
+			if (auto widget = qobject_cast<QWidget*>(child)) {
+				widget->show();
+			}
+		}
+	}
+
+	QPointer<TWidget> weakThis() {
+		return QPointer<TWidget>(this);
+	}
+	QPointer<const TWidget> weakThis() const {
+		return QPointer<const TWidget>(this);
+	}
+
+	virtual ~TWidget() {
+	}
+
+protected:
+	void enterEventHook(QEvent *e) {
+		return QWidget::enterEvent(e);
+	}
+	void leaveEventHook(QEvent *e) {
+		return QWidget::leaveEvent(e);
+	}
+
 };
 
 void myEnsureResized(QWidget *target);
@@ -193,7 +226,9 @@ class PlainShadow : public TWidget {
 public:
 	PlainShadow(QWidget *parent, const style::color &color) : TWidget(parent), _color(color) {
 	}
-	void paintEvent(QPaintEvent *e) {
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
 		Painter(this).fillRect(e->rect(), _color->b);
 	}
 
@@ -202,27 +237,58 @@ private:
 
 };
 
+class ToggleableShadow : public TWidget {
+public:
+	ToggleableShadow(QWidget *parent, const style::color &color) : TWidget(parent), _color(color) {
+	}
+
+	enum class Mode {
+		Shown,
+		ShownFast,
+		Hidden,
+		HiddenFast
+	};
+	void setMode(Mode mode);
+
+	bool isFullyShown() const {
+		return _shown && _a_opacity.isNull();
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	void repaintCallback() {
+		update();
+	}
+
+	const style::color &_color;
+	FloatAnimation _a_opacity;
+	bool _shown = true;
+
+};
+
 class SingleDelayedCall : public QObject {
 	Q_OBJECT
 
 public:
-	SingleDelayedCall(QObject *parent, const char *member) : QObject(parent), _pending(false), _member(member) {
+	SingleDelayedCall(QObject *parent, const char *member) : QObject(parent), _member(member) {
 	}
 	void call() {
-		if (!_pending) {
-			_pending = true;
+		if (!_pending.loadAcquire()) {
+			_pending.storeRelease(1);
 			QMetaObject::invokeMethod(this, "makeDelayedCall", Qt::QueuedConnection);
 		}
 	}
 
 private slots:
 	void makeDelayedCall() {
-		_pending = false;
+		_pending.storeRelease(0);
 		QMetaObject::invokeMethod(parent(), _member);
 	}
 
 private:
-	bool _pending;
+	QAtomicInt _pending = { 0 };
 	const char *_member;
 
 };
@@ -264,7 +330,27 @@ public:
 		return _widget;
 	}
 
+	void destroy() {
+		if (_widget) {
+			delete _widget;
+			_widget = nullptr;
+		}
+	}
+	void destroyDelayed() {
+		if (_widget) {
+			_widget->hide();
+			_widget->deleteLater();
+			_widget = nullptr;
+		}
+	}
+
 private:
 	T *_widget;
 
 };
+
+void sendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton button, const QPoint &globalPoint);
+
+inline void sendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton button) {
+	return sendSynteticMouseEvent(widget, type, button, QCursor::pos());
+}

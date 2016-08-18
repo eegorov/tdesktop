@@ -20,12 +20,18 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
+#include "window/section_widget.h"
+
 class MainWidget;
 namespace Dialogs {
 class Row;
 class FakeRow;
 class IndexedList;
 } // namespace Dialogs
+
+namespace Ui {
+class RoundButton;
+} // namespace Ui
 
 enum DialogsSearchRequestType {
 	DialogsSearchFromStart,
@@ -260,7 +266,10 @@ public:
 
 	void dialogsToUp();
 
-	void animShow(const QPixmap &bgAnimCache);
+	bool hasTopBarShadow() const {
+		return true;
+	}
+	void showAnimated(Window::SlideDirection direction, const Window::SectionSlideParams &params);
 	void step_show(float64 ms, bool timer);
 
 	void destroyData();
@@ -331,14 +340,15 @@ private:
 	mtpRequestId _dialogsRequest, _contactsRequest;
 
 	FlatInput _filter;
-	IconedButton _newGroup, _addContact, _cancelSearch;
+	ChildWidget<Ui::RoundButton> _newGroup;
+	IconedButton _addContact, _cancelSearch;
 	ScrollArea _scroll;
 	DialogsInner _inner;
 
 	Animation _a_show;
 	QPixmap _cacheUnder, _cacheOver;
 	anim::ivalue a_coordUnder, a_coordOver;
-	anim::fvalue a_shadow;
+	anim::fvalue a_progress;
 
 	PeerData *_searchInPeer, *_searchInMigrated;
 

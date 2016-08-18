@@ -27,8 +27,6 @@ class MainWindow;
 class MainWidget;
 class SettingsWidget;
 class ApiWrap;
-class Font;
-class Color;
 class FileUploader;
 
 #include "history.h"
@@ -39,7 +37,7 @@ typedef QHash<PhotoData*, HistoryItemsMap> PhotoItems;
 typedef QHash<DocumentData*, HistoryItemsMap> DocumentItems;
 typedef QHash<WebPageData*, HistoryItemsMap> WebPageItems;
 typedef QHash<int32, HistoryItemsMap> SharedContactItems;
-typedef QHash<ClipReader*, HistoryItem*> GifItems;
+typedef QHash<Media::Clip::Reader*, HistoryItem*> GifItems;
 
 typedef QHash<PhotoId, PhotoData*> PhotosData;
 typedef QHash<DocumentId, DocumentData*> DocumentsData;
@@ -59,13 +57,19 @@ namespace App {
 
 	QString formatPhone(QString phone);
 
-	int32 onlineForSort(UserData *user, int32 now);
-	int32 onlineWillChangeIn(UserData *user, int32 nowOnServer);
-	QString onlineText(UserData *user, int32 nowOnServer, bool precise = false);
-	bool onlineColorUse(UserData *user, int32 now);
+	TimeId onlineForSort(UserData *user, TimeId now);
+	int32 onlineWillChangeIn(UserData *user, TimeId now);
+	int32 onlineWillChangeIn(TimeId online, TimeId now);
+	QString onlineText(UserData *user, TimeId now, bool precise = false);
+	QString onlineText(TimeId online, TimeId now, bool precise = false);
+	bool onlineColorUse(UserData *user, TimeId now);
+	bool onlineColorUse(TimeId online, TimeId now);
 
-	UserData *feedUsers(const MTPVector<MTPUser> &users, bool emitPeerUpdated = true); // returns last user
-	PeerData *feedChats(const MTPVector<MTPChat> &chats, bool emitPeerUpdated = true); // returns last chat
+	UserData *feedUser(const MTPUser &user);
+	UserData *feedUsers(const MTPVector<MTPUser> &users); // returns last user
+	PeerData *feedChat(const MTPChat &chat);
+	PeerData *feedChats(const MTPVector<MTPChat> &chats); // returns last chat
+
 	void feedParticipants(const MTPChatParticipants &p, bool requestBotInfos, bool emitPeerUpdated = true);
 	void feedParticipantAdd(const MTPDupdateChatParticipantAdd &d, bool emitPeerUpdated = true);
 	void feedParticipantDelete(const MTPDupdateChatParticipantDelete &d, bool emitPeerUpdated = true);
@@ -73,19 +77,18 @@ namespace App {
 	void feedParticipantAdmin(const MTPDupdateChatParticipantAdmin &d, bool emitPeerUpdated = true);
 	bool checkEntitiesAndViewsUpdate(const MTPDmessage &m); // returns true if item found and it is not detached
 	void updateEditedMessage(const MTPDmessage &m);
+	void updateEditedMessageToEmpty(PeerId peerId, MsgId msgId);
 	void addSavedGif(DocumentData *doc);
 	void checkSavedGif(HistoryItem *item);
 	void feedMsgs(const QVector<MTPMessage> &msgs, NewMessageType type);
 	void feedMsgs(const MTPVector<MTPMessage> &msgs, NewMessageType type);
 	void feedInboxRead(const PeerId &peer, MsgId upTo);
-	void feedOutboxRead(const PeerId &peer, MsgId upTo);
+	void feedOutboxRead(const PeerId &peer, MsgId upTo, TimeId when);
 	void feedWereDeleted(ChannelId channelId, const QVector<MTPint> &msgsIds);
-	void feedUserLinks(const MTPVector<MTPcontacts_Link> &links, bool emitPeerUpdated = true);
-	void feedUserLink(MTPint userId, const MTPContactLink &myLink, const MTPContactLink &foreignLink, bool emitPeerUpdated = true);
+	void feedUserLink(MTPint userId, const MTPContactLink &myLink, const MTPContactLink &foreignLink);
 
 	void markPeerUpdated(PeerData *data);
 	void clearPeerUpdated(PeerData *data);
-	void emitPeerUpdated();
 
 	ImagePtr image(const MTPPhotoSize &size);
 	StorageImageLocation imageLocation(int32 w, int32 h, const MTPFileLocation &loc);
@@ -148,7 +151,7 @@ namespace App {
 	PhotoData *photo(const PhotoId &photo);
 	PhotoData *photoSet(const PhotoId &photo, PhotoData *convert, const uint64 &access, int32 date, const ImagePtr &thumb, const ImagePtr &medium, const ImagePtr &full);
 	DocumentData *document(const DocumentId &document);
-	DocumentData *documentSet(const DocumentId &document, DocumentData *convert, const uint64 &access, int32 date, const QVector<MTPDocumentAttribute> &attributes, const QString &mime, const ImagePtr &thumb, int32 dc, int32 size, const StorageImageLocation &thumbLocation);
+	DocumentData *documentSet(const DocumentId &document, DocumentData *convert, const uint64 &access, int32 version, int32 date, const QVector<MTPDocumentAttribute> &attributes, const QString &mime, const ImagePtr &thumb, int32 dc, int32 size, const StorageImageLocation &thumbLocation);
 	WebPageData *webPage(const WebPageId &webPage);
 	WebPageData *webPageSet(const WebPageId &webPage, WebPageData *convert, const QString &, const QString &url, const QString &displayUrl, const QString &siteName, const QString &title, const QString &description, PhotoData *photo, DocumentData *doc, int32 duration, const QString &author, int32 pendingTill);
 	LocationData *location(const LocationCoords &coords);
@@ -158,7 +161,7 @@ namespace App {
 
 	Histories &histories();
 	History *history(const PeerId &peer);
-	History *historyFromDialog(const PeerId &peer, int32 unreadCnt, int32 maxInboxRead);
+	History *historyFromDialog(const PeerId &peer, int32 unreadCnt, int32 maxInboxRead, int32 maxOutboxRead);
 	History *historyLoaded(const PeerId &peer);
 	HistoryItem *histItemById(ChannelId channelId, MsgId itemId);
 	inline History *history(const PeerData *peer) {
@@ -202,6 +205,7 @@ namespace App {
 	HistoryItem *contextItem();
 	void mousedItem(HistoryItem *item);
 	HistoryItem *mousedItem();
+	void clearMousedItems();
 
 	const style::font &monofont();
 	const QPixmap &sprite();
@@ -226,11 +230,13 @@ namespace App {
 	};
 	void quit();
 	bool quitting();
+	void allDraftsSaved();
 	LaunchState launchState();
 	void setLaunchState(LaunchState state);
 
 	QImage readImage(QByteArray data, QByteArray *format = 0, bool opaque = true, bool *animated = 0);
 	QImage readImage(const QString &file, QByteArray *format = 0, bool opaque = true, bool *animated = 0, QByteArray *content = 0);
+	QPixmap pixmapFromImageInPlace(QImage &&image);
 
 	void regPhotoItem(PhotoData *data, HistoryItem *item);
 	void unregPhotoItem(PhotoData *data, HistoryItem *item);
@@ -251,8 +257,8 @@ namespace App {
 	const SharedContactItems &sharedContactItems();
 	QString phoneFromSharedContact(int32 userId);
 
-	void regGifItem(ClipReader *reader, HistoryItem *item);
-	void unregGifItem(ClipReader *reader);
+	void regGifItem(Media::Clip::Reader *reader, HistoryItem *item);
+	void unregGifItem(Media::Clip::Reader *reader);
 	void stopGifItems();
 
 	void regMuted(PeerData *peer, int32 changeIn);
@@ -265,7 +271,7 @@ namespace App {
 #endif
 	void setProxySettings(QTcpSocket &socket);
 
-	QImage **cornersMask();
+	QImage **cornersMask(ImageRoundRadius radius);
 	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, RoundCorners index, const style::color *sh = 0);
 	inline void roundRect(Painter &p, const QRect &rect, const style::color &bg, RoundCorners index, const style::color *sh = 0) {
 		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, index, sh);
@@ -274,9 +280,9 @@ namespace App {
 	inline void roundShadow(Painter &p, const QRect &rect, const style::color &sh, RoundCorners index) {
 		return roundShadow(p, rect.x(), rect.y(), rect.width(), rect.height(), sh, index);
 	}
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg);
-	inline void roundRect(Painter &p, const QRect &rect, const style::color &bg) {
-		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg);
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, ImageRoundRadius radius);
+	inline void roundRect(Painter &p, const QRect &rect, const style::color &bg, ImageRoundRadius radius) {
+		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, radius);
 	}
 
 	void initBackground(int32 id = DefaultChatBackground, const QImage &p = QImage(), bool nowrite = false);
@@ -300,5 +306,3 @@ namespace App {
 	DeclareSetting(WallPapers, ServerBackgrounds);
 
 };
-
-#include "facades.h"

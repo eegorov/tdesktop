@@ -31,8 +31,6 @@ Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)
 Q_IMPORT_PLUGIN(QDDSPlugin)
 Q_IMPORT_PLUGIN(QICNSPlugin)
 Q_IMPORT_PLUGIN(QICOPlugin)
-Q_IMPORT_PLUGIN(QJp2Plugin)
-Q_IMPORT_PLUGIN(QMngPlugin)
 Q_IMPORT_PLUGIN(QTgaPlugin)
 Q_IMPORT_PLUGIN(QTiffPlugin)
 Q_IMPORT_PLUGIN(QWbmpPlugin)
@@ -779,7 +777,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
 			cpp.close();
 		}
 		if (write_cpp) {
-			cout << "lang.cpp updated, writing " << keysOrder.size() << " rows.\n";
 			if (!cpp.open(QIODevice::WriteOnly)) throw Exception("Could not open lang.cpp for writing!");
 			if (cpp.write(cppText) != cppText.size()) throw Exception("Could not open lang.cpp for writing!");
 		}
@@ -793,7 +790,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
 			h.close();
 		}
 		if (write_h) {
-			cout << "lang.h updated, writing " << keysOrder.size() << " rows.\n";
 			if (!h.open(QIODevice::WriteOnly)) throw Exception("Could not open lang.h for writing!");
 			if (h.write(hText) != hText.size()) throw Exception("Could not open lang.h for writing!");
 		}

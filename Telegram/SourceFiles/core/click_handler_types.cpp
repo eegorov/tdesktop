@@ -24,6 +24,8 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "lang.h"
 #include "pspecific.h"
 #include "boxes/confirmbox.h"
+#include "core/qthelp_regex.h"
+#include "core/qthelp_url.h"
 
 QString UrlClickHandler::copyToClipboardContextItemText() const {
 	return lang(isEmail() ? lng_context_copy_email : lng_context_copy_link);
@@ -31,23 +33,28 @@ QString UrlClickHandler::copyToClipboardContextItemText() const {
 
 namespace {
 
-QString tryConvertUrlToLocal(const QString &url) {
-	QRegularExpressionMatch telegramMeUser = QRegularExpression(qsl("^https?://telegram\\.me/([a-zA-Z0-9\\.\\_]+)(/?\\?|/?$|/(\\d+)/?(?:\\?|$))"), QRegularExpression::CaseInsensitiveOption).match(url);
-	QRegularExpressionMatch telegramMeGroup = QRegularExpression(qsl("^https?://telegram\\.me/joinchat/([a-zA-Z0-9\\.\\_\\-]+)(\\?|$)"), QRegularExpression::CaseInsensitiveOption).match(url);
-	QRegularExpressionMatch telegramMeStickers = QRegularExpression(qsl("^https?://telegram\\.me/addstickers/([a-zA-Z0-9\\.\\_]+)(\\?|$)"), QRegularExpression::CaseInsensitiveOption).match(url);
-	QRegularExpressionMatch telegramMeShareUrl = QRegularExpression(qsl("^https?://telegram\\.me/share/url\\?(.+)$"), QRegularExpression::CaseInsensitiveOption).match(url);
-	if (telegramMeGroup.hasMatch()) {
-		return qsl("tg://join?invite=") + myUrlEncode(telegramMeGroup.captured(1));
-	} else if (telegramMeStickers.hasMatch()) {
-		return qsl("tg://addstickers?set=") + myUrlEncode(telegramMeStickers.captured(1));
-	} else if (telegramMeShareUrl.hasMatch()) {
-		return qsl("tg://msg_url?") + telegramMeShareUrl.captured(1);
-	} else if (telegramMeUser.hasMatch()) {
-		QString params = url.mid(telegramMeUser.captured(0).size()), postParam;
-		if (QRegularExpression(qsl("^/\\d+/?(?:\\?|$)")).match(telegramMeUser.captured(2)).hasMatch()) {
-			postParam = qsl("&post=") + telegramMeUser.captured(3);
+QString tryConvertUrlToLocal(QString url) {
+	if (url.size() > 8192) url = url.mid(0, 8192);
+
+	using namespace qthelp;
+	auto matchOptions = RegExOption::CaseInsensitive;
+	if (auto telegramMeMatch = regex_match(qsl("https?://telegram\\.me/(.+)$"), url, matchOptions)) {
+		auto query = telegramMeMatch->capturedRef(1);
+		if (auto joinChatMatch = regex_match(qsl("^joinchat/([a-zA-Z0-9\\.\\_\\-]+)(\\?|$)"), query, matchOptions)) {
+			return qsl("tg://join?invite=") + url_encode(joinChatMatch->captured(1));
+		} else if (auto stickerSetMatch = regex_match(qsl("^addstickers/([a-zA-Z0-9\\.\\_]+)(\\?|$)"), query, matchOptions)) {
+			return qsl("tg://addstickers?set=") + url_encode(stickerSetMatch->captured(1));
+		} else if (auto shareUrlMatch = regex_match(qsl("^share/url/?\\?(.+)$"), query, matchOptions)) {
+			return qsl("tg://msg_url?") + shareUrlMatch->captured(1);
+		} else if (auto confirmPhoneMatch = regex_match(qsl("^confirmphone/?\\?(.+)"), query, matchOptions)) {
+			return qsl("tg://confirmphone?") + confirmPhoneMatch->captured(1);
+		} else if (auto usernameMatch = regex_match(qsl("^([a-zA-Z0-9\\.\\_]+)(/?\\?|/?$|/(\\d+)/?(?:\\?|$))"), query, matchOptions)) {
+			QString params = query.mid(usernameMatch->captured(0).size()).toString(), postParam;
+			if (auto postMatch = regex_match(qsl("^/\\d+/?(?:\\?|$)"), usernameMatch->captured(2))) {
+				postParam = qsl("&post=") + usernameMatch->captured(3);
+			}
+			return qsl("tg://resolve/?domain=") + url_encode(usernameMatch->captured(1)) + postParam + (params.isEmpty() ? QString() : '&' + params);
 		}
-		return qsl("tg://resolve/?domain=") + myUrlEncode(telegramMeUser.captured(1)) + postParam + (params.isEmpty() ? QString() : '&' + params);
 	}
 	return url;
 }
@@ -110,15 +117,22 @@ QString HiddenUrlClickHandler::getExpandedLinkText(ExpandLinksMode mode, const Q
 	QString result;
 	if (mode == ExpandLinksAll) {
 		result = textPart.toString() + qsl(" (") + url() + ')';
+	} else if (mode == ExpandLinksUrlOnly) {
+		result = url();
 	}
 	return result;
 }
 
 TextWithEntities HiddenUrlClickHandler::getExpandedLinkTextWithEntities(ExpandLinksMode mode, int entityOffset, const QStringRef &textPart) const {
 	TextWithEntities result;
-	result.entities.push_back({ EntityInTextCustomUrl, entityOffset, textPart.size(), url() });
-	if (mode == ExpandLinksAll) {
-		result.text = textPart.toString() + qsl(" (") + url() + ')';
+	if (mode == ExpandLinksUrlOnly) {
+		result.text = url();
+		result.entities.push_back({ EntityInTextUrl, entityOffset, result.text.size() });
+	} else {
+		result.entities.push_back({ EntityInTextCustomUrl, entityOffset, textPart.size(), url() });
+		if (mode == ExpandLinksAll) {
+			result.text = textPart.toString() + qsl(" (") + url() + ')';
+		}
 	}
 	return result;
 }
@@ -174,9 +188,19 @@ TextWithEntities HashtagClickHandler::getExpandedLinkTextWithEntities(ExpandLink
 	return simpleTextWithEntity({ EntityInTextHashtag, entityOffset, textPart.size() });
 }
 
+PeerData *BotCommandClickHandler::_peer = nullptr;
+UserData *BotCommandClickHandler::_bot = nullptr;
 void BotCommandClickHandler::onClick(Qt::MouseButton button) const {
 	if (button == Qt::LeftButton || button == Qt::MiddleButton) {
-		if (PeerData *peer = Ui::getPeerForMouseAction()) {
+		if (auto peer = peerForCommand()) {
+			if (auto bot = peer->isUser() ? peer->asUser() : botForCommand()) {
+				Ui::showPeerHistory(peer, ShowAtTheEndMsgId);
+				App::sendBotCommand(peer, bot, _cmd);
+				return;
+			}
+		}
+
+		if (auto peer = Ui::getPeerForMouseAction()) { // old way
 			UserData *bot = peer->isUser() ? peer->asUser() : nullptr;
 			if (auto item = App::hoveredLinkItem()) {
 				if (!bot) {

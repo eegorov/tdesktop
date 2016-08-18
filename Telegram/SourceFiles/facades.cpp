@@ -20,16 +20,20 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
+#include "profile/profile_section_memento.h"
+#include "core/vector_of_moveable.h"
+#include "core/click_handler_types.h"
+#include "observer_peer.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
 #include "application.h"
-#include "core/click_handler_types.h"
 #include "boxes/confirmbox.h"
 #include "layerwidget.h"
 #include "lang.h"
 
 Q_DECLARE_METATYPE(ClickHandlerPtr);
 Q_DECLARE_METATYPE(Qt::MouseButton);
+Q_DECLARE_METATYPE(Ui::ShowWay);
 
 namespace App {
 
@@ -74,7 +78,7 @@ void activateBotCommand(const HistoryItem *msg, int row, int col) {
 
 	case HistoryMessageReplyMarkup::Button::Url: {
 		auto url = QString::fromUtf8(button->data);
-		HiddenUrlClickHandler(url).onClick(Qt::LeftButton);
+		UrlClickHandler(url).onClick(Qt::LeftButton);
 	} break;
 
 	case HistoryMessageReplyMarkup::Button::RequestLocation: {
@@ -91,6 +95,8 @@ void activateBotCommand(const HistoryItem *msg, int row, int col) {
 		if (auto m = App::main()) {
 			auto getMessageBot = [msg]() -> UserData* {
 				if (auto bot = msg->viaBot()) {
+					return bot;
+				} else if (auto bot = msg->from()->asUser()) {
 					return bot;
 				} else if (auto bot = msg->history()->peer->asUser()) {
 					return bot;
@@ -237,16 +243,25 @@ void autoplayMediaInlineAsync(const FullMsgId &msgId) {
 }
 
 void showPeerProfile(const PeerId &peer) {
-	if (MainWidget *m = App::main()) m->showPeerProfile(App::peer(peer));
+	if (auto m = App::main()) {
+		m->showWideSection(Profile::SectionMemento(App::peer(peer)));
+	}
 }
 
-void showPeerHistory(const PeerId &peer, MsgId msgId, bool back) {
-	if (MainWidget *m = App::main()) m->ui_showPeerHistory(peer, msgId, back);
+void showPeerOverview(const PeerId &peer, MediaOverviewType type) {
+	if (auto m = App::main()) {
+		m->showMediaOverview(App::peer(peer), type);
+	}
 }
 
-void showPeerHistoryAsync(const PeerId &peer, MsgId msgId) {
+void showPeerHistory(const PeerId &peer, MsgId msgId, ShowWay way) {
+	if (MainWidget *m = App::main()) m->ui_showPeerHistory(peer, msgId, way);
+}
+
+void showPeerHistoryAsync(const PeerId &peer, MsgId msgId, ShowWay way) {
 	if (MainWidget *m = App::main()) {
-		QMetaObject::invokeMethod(m, "ui_showPeerHistoryAsync", Qt::QueuedConnection, Q_ARG(quint64, peer), Q_ARG(qint32, msgId));
+		qRegisterMetaType<Ui::ShowWay>();
+		QMetaObject::invokeMethod(m, "ui_showPeerHistoryAsync", Qt::QueuedConnection, Q_ARG(quint64, peer), Q_ARG(qint32, msgId), Q_ARG(Ui::ShowWay, way));
 	}
 }
 
@@ -263,11 +278,20 @@ bool hideWindowNoQuit() {
 			if (cWorkMode() == dbiwmTrayOnly || cWorkMode() == dbiwmWindowAndTray) {
 				return w->minimizeToTray();
 			} else if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-				w->hide();
+				w->closeWithoutDestroy();
 				w->updateIsActive(Global::OfflineBlurTimeout());
 				w->updateGlobalMenu();
 				return true;
 			}
+		}
+	}
+	return false;
+}
+
+bool skipPaintEvent(QWidget *widget, QPaintEvent *event) {
+	if (auto w = App::wnd()) {
+		if (w->contentOverlapped(widget, event)) {
+			return true;
 		}
 	}
 	return false;
@@ -286,7 +310,10 @@ void userIsContactChanged(UserData *user, bool fromThisApp) {
 }
 
 void botCommandsChanged(UserData *user) {
-	if (MainWidget *m = App::main()) m->notify_botCommandsChanged(user);
+	if (MainWidget *m = App::main()) {
+		m->notify_botCommandsChanged(user);
+	}
+	peerUpdatedDelayed(user, PeerUpdate::Flag::BotCommandsChanged);
 }
 
 void inlineBotRequesting(bool requesting) {
@@ -493,6 +520,45 @@ DefineVar(Sandbox, ConnectionProxy, PreLaunchProxy);
 
 } // namespace Sandbox
 
+namespace Stickers {
+
+Set *feedSet(const MTPDstickerSet &set) {
+	MTPDstickerSet::Flags flags = 0;
+
+	auto &sets = Global::RefStickerSets();
+	auto it = sets.find(set.vid.v);
+	auto title = stickerSetTitle(set);
+	if (it == sets.cend()) {
+		it = sets.insert(set.vid.v, Stickers::Set(set.vid.v, set.vaccess_hash.v, title, qs(set.vshort_name), set.vcount.v, set.vhash.v, set.vflags.v | MTPDstickerSet_ClientFlag::f_not_loaded));
+	} else {
+		it->access = set.vaccess_hash.v;
+		it->title = title;
+		it->shortName = qs(set.vshort_name);
+		flags = it->flags;
+		auto clientFlags = it->flags & (MTPDstickerSet_ClientFlag::f_featured | MTPDstickerSet_ClientFlag::f_unread | MTPDstickerSet_ClientFlag::f_not_loaded | MTPDstickerSet_ClientFlag::f_special);
+		it->flags = set.vflags.v | clientFlags;
+		if (it->count != set.vcount.v || it->hash != set.vhash.v || it->emoji.isEmpty()) {
+			it->count = set.vcount.v;
+			it->hash = set.vhash.v;
+			it->flags |= MTPDstickerSet_ClientFlag::f_not_loaded; // need to request this set
+		}
+	}
+	auto changedFlags = (flags ^ it->flags);
+	if (changedFlags & MTPDstickerSet::Flag::f_archived) {
+		auto index = Global::ArchivedStickerSetsOrder().indexOf(it->id);
+		if (it->flags & MTPDstickerSet::Flag::f_archived) {
+			if (index < 0) {
+				Global::RefArchivedStickerSetsOrder().push_front(it->id);
+			}
+		} else if (index >= 0) {
+			Global::RefArchivedStickerSetsOrder().removeAt(index);
+		}
+	}
+	return &it.value();
+}
+
+} // namespace Stickers
+
 namespace Global {
 namespace internal {
 
@@ -500,13 +566,21 @@ struct Data {
 	uint64 LaunchId = 0;
 	SingleDelayedCall HandleHistoryUpdate = { App::app(), "call_handleHistoryUpdate" };
 	SingleDelayedCall HandleUnreadCounterUpdate = { App::app(), "call_handleUnreadCounterUpdate" };
+	SingleDelayedCall HandleFileDialogQueue = { App::app(), "call_handleFileDialogQueue" };
+	SingleDelayedCall HandleDelayedPeerUpdates = { App::app(), "call_handleDelayedPeerUpdates" };
 
 	Adaptive::Layout AdaptiveLayout = Adaptive::NormalLayout;
 	bool AdaptiveForWide = true;
 	bool DialogsModeEnabled = false;
 	Dialogs::Mode DialogsMode = Dialogs::Mode::All;
+	bool ModerateModeEnabled = false;
+
+	bool ScreenIsLocked = false;
 
 	int32 DebugLoggingFlags = 0;
+
+	float64 SongVolume = 0.9;
+	float64 VideoVolume = 0.9;
 
 	// config
 	int32 ChatSizeMax = 200;
@@ -524,6 +598,7 @@ struct Data {
 	int32 PushChatLimit = 2;
 	int32 SavedGifsLimit = 200;
 	int32 EditTimeLimit = 172800;
+	int32 StickersRecentLimit = 30;
 
 	HiddenPinnedMessagesMap HiddenPinnedMessages;
 
@@ -532,6 +607,11 @@ struct Data {
 	Stickers::Sets StickerSets;
 	Stickers::Order StickerSetsOrder;
 	uint64 LastStickersUpdate = 0;
+	uint64 LastRecentStickersUpdate = 0;
+	Stickers::Order FeaturedStickerSetsOrder;
+	int FeaturedStickerSetsUnreadCount = 0;
+	uint64 LastFeaturedStickersUpdate = 0;
+	Stickers::Order ArchivedStickerSetsOrder;
 
 	MTP::DcOptions DcOptions;
 
@@ -563,13 +643,21 @@ void finish() {
 DefineReadOnlyVar(Global, uint64, LaunchId);
 DefineRefVar(Global, SingleDelayedCall, HandleHistoryUpdate);
 DefineRefVar(Global, SingleDelayedCall, HandleUnreadCounterUpdate);
+DefineRefVar(Global, SingleDelayedCall, HandleFileDialogQueue);
+DefineRefVar(Global, SingleDelayedCall, HandleDelayedPeerUpdates);
 
 DefineVar(Global, Adaptive::Layout, AdaptiveLayout);
 DefineVar(Global, bool, AdaptiveForWide);
 DefineVar(Global, bool, DialogsModeEnabled);
 DefineVar(Global, Dialogs::Mode, DialogsMode);
+DefineVar(Global, bool, ModerateModeEnabled);
+
+DefineVar(Global, bool, ScreenIsLocked);
 
 DefineVar(Global, int32, DebugLoggingFlags);
+
+DefineVar(Global, float64, SongVolume);
+DefineVar(Global, float64, VideoVolume);
 
 // config
 DefineVar(Global, int32, ChatSizeMax);
@@ -587,6 +675,7 @@ DefineVar(Global, int32, PushChatPeriod);
 DefineVar(Global, int32, PushChatLimit);
 DefineVar(Global, int32, SavedGifsLimit);
 DefineVar(Global, int32, EditTimeLimit);
+DefineVar(Global, int32, StickersRecentLimit);
 
 DefineVar(Global, HiddenPinnedMessagesMap, HiddenPinnedMessages);
 
@@ -595,6 +684,11 @@ DefineRefVar(Global, PendingItemsMap, PendingRepaintItems);
 DefineVar(Global, Stickers::Sets, StickerSets);
 DefineVar(Global, Stickers::Order, StickerSetsOrder);
 DefineVar(Global, uint64, LastStickersUpdate);
+DefineVar(Global, uint64, LastRecentStickersUpdate);
+DefineVar(Global, Stickers::Order, FeaturedStickerSetsOrder);
+DefineVar(Global, int, FeaturedStickerSetsUnreadCount);
+DefineVar(Global, uint64, LastFeaturedStickersUpdate);
+DefineVar(Global, Stickers::Order, ArchivedStickerSetsOrder);
 
 DefineVar(Global, MTP::DcOptions, DcOptions);
 

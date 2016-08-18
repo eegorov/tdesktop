@@ -35,44 +35,25 @@ public:
 
 void paintImportantSwitch(Painter &p, Mode current, int w, bool selected, bool onlyBackground);
 
-// This will be moved somewhere outside as soon as anyone starts using that.
-class StyleSheet {
-public:
-	virtual ~StyleSheet() = 0;
+enum UnreadBadgeSize {
+	UnreadBadgeInDialogs = 0,
+	UnreadBadgeInHistoryToDown,
+	UnreadBadgeInStickersPanel,
+	UnreadBadgeInStickersBox,
+
+	UnreadBadgeSizesCount
 };
-inline StyleSheet::~StyleSheet() = default;
+struct UnreadBadgeStyle {
+	UnreadBadgeStyle();
 
-namespace internal {
-
-void registerStyleSheet(StyleSheet **p);
-
-} // namespace
-
-// Must be created in global scope!
-template <typename T>
-class StyleSheetPointer {
-public:
-	StyleSheetPointer() = default;
-	StyleSheetPointer(const StyleSheetPointer<T> &other) = delete;
-	StyleSheetPointer &operator=(const StyleSheetPointer<T> &other) = delete;
-
-	void createIfNull() {
-		if (!_p) {
-			_p = new T();
-			internal::registerStyleSheet(&_p);
-		}
-	}
-	T *operator->() {
-		t_assert(_p != nullptr);
-		return static_cast<T*>(_p);
-	}
-
-private:
-	StyleSheet *_p;
-
+	style::align align;
+	bool active;
+	bool muted;
+	int size;
+	UnreadBadgeSize sizeId;
+	style::font font;
 };
-
-void clearStyleSheets();
+void paintUnreadCount(Painter &p, const QString &text, int x, int y, const UnreadBadgeStyle &st, int *outUnreadWidth = nullptr);
 
 } // namespace Layout
 } // namespace Dialogs

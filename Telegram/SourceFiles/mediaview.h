@@ -22,25 +22,21 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #include "dropdown.h"
 
+namespace Media {
+namespace Clip {
+class Controller;
+} // namespace Clip
+} // namespace Media
+
+struct AudioPlaybackState;
+
 class MediaView : public TWidget, public RPCSender, public ClickHandlerHost {
 	Q_OBJECT
 
 public:
-
 	MediaView();
 
-	void paintEvent(QPaintEvent *e) override;
-
-	void keyPressEvent(QKeyEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void mouseMoveEvent(QMouseEvent *e) override;
-	void mouseReleaseEvent(QMouseEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-
-	bool event(QEvent *e) override;
-
-	void hide();
+	void setVisible(bool visible) override;
 
 	void updateOver(QPoint mpos);
 
@@ -48,13 +44,13 @@ public:
 	void showPhoto(PhotoData *photo, PeerData *context);
 	void showDocument(DocumentData *doc, HistoryItem *context);
 	void moveToScreen();
-	void moveToNext(int32 delta);
+	bool moveToNext(int32 delta);
 	void preloadData(int32 delta);
 
-	void leaveToChildEvent(QEvent *e) override { // e -- from enterEvent() of child TWidget
+	void leaveToChildEvent(QEvent *e, QWidget *child) override { // e -- from enterEvent() of child TWidget
 		updateOverState(OverNone);
 	}
-	void enterFromChildEvent(QEvent *e) override { // e -- from leaveEvent() of child TWidget
+	void enterFromChildEvent(QEvent *e, QWidget *child) override { // e -- from leaveEvent() of child TWidget
 		updateOver(mapFromGlobal(QCursor::pos()));
 	}
 
@@ -71,8 +67,10 @@ public:
 	void activateControls();
 	void onDocClick();
 
-	void clipCallback(ClipReaderNotification notification);
+	void clipCallback(Media::Clip::Notification notification);
 	PeerData *ui_getPeerForMouseAction();
+
+	void clearData();
 
 	~MediaView();
 
@@ -81,9 +79,10 @@ public:
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;
 
 public slots:
-
 	void onHideControls(bool force = false);
 	void onDropdownHiding();
+
+	void onScreenResized(int screen);
 
 	void onToMessage();
 	void onSaveAs();
@@ -104,12 +103,61 @@ public slots:
 
 	void updateImage();
 
-private:
+protected:
+	void paintEvent(QPaintEvent *e) override;
 
+	void keyPressEvent(QKeyEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseDoubleClickEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
+	void touchEvent(QTouchEvent *e);
+
+	bool event(QEvent *e) override;
+	bool eventFilter(QObject *obj, QEvent *e) override;
+
+private slots:
+	void onVideoPauseResume();
+	void onVideoSeekProgress(int64 positionMs);
+	void onVideoSeekFinished(int64 positionMs);
+	void onVideoVolumeChanged(float64 volume);
+	void onVideoToggleFullScreen();
+	void onVideoPlayProgress(const AudioMsgId &audioId);
+
+private:
 	void displayPhoto(PhotoData *photo, HistoryItem *item);
 	void displayDocument(DocumentData *doc, HistoryItem *item);
 	void findCurrent();
 	void loadBack();
+
+	void updateCursor();
+	void setZoomLevel(int newZoom);
+
+	void updateVideoPlaybackState(const AudioPlaybackState &state, bool reset = false);
+	void updateSilentVideoPlaybackState();
+	void restartVideoAtSeekPosition(int64 positionMs);
+
+	void createClipController();
+	void setClipControllerGeometry();
+
+	void initAnimation();
+	void createClipReader();
+
+	// Radial animation interface.
+	float64 radialProgress() const;
+	bool radialLoading() const;
+	QRect radialRect() const;
+	void radialStart();
+	uint64 radialTimeShift() const;
+
+	// Computes the last OverviewChatPhotos PhotoData* from _history or _migrated.
+	struct LastChatPhoto {
+		HistoryItem *item;
+		PhotoData *photo;
+	};
+	LastChatPhoto computeLastOverviewChatPhoto();
+	void computeAdditionalChatPhoto(PeerData *peer, PhotoData *lastOverviewPhoto);
 
 	void userPhotosLoaded(UserData *u, const MTPphotos_Photos &photos, mtpRequestId req);
 
@@ -122,33 +170,53 @@ private:
 	void step_state(uint64 ms, bool timer);
 	void step_radial(uint64 ms, bool timer);
 
+	void paintDocRadialLoading(Painter &p, bool radial, float64 radialOpacity);
+
 	QBrush _transparentBrush;
 
-	PhotoData *_photo;
-	DocumentData *_doc;
-	MediaOverviewType _overview;
+	PhotoData *_photo = nullptr;
+	DocumentData *_doc = nullptr;
+	MediaOverviewType _overview = OverviewCount;
 	QRect _closeNav, _closeNavIcon;
 	QRect _leftNav, _leftNavIcon, _rightNav, _rightNavIcon;
 	QRect _headerNav, _nameNav, _dateNav;
 	QRect _saveNav, _saveNavIcon, _moreNav, _moreNavIcon;
-	bool _leftNavVisible, _rightNavVisible, _saveVisible, _headerHasLink;
+	bool _leftNavVisible = false;
+	bool _rightNavVisible = false;
+	bool _saveVisible = false;
+	bool _headerHasLink = false;
 	QString _dateText;
 	QString _headerText;
+
+	ChildWidget<Media::Clip::Controller> _clipController = { nullptr };
+	DocumentData *_autoplayVideoDocument = nullptr;
+	bool _fullScreenVideo = false;
+	int _fullScreenZoomCache = 0;
 
 	Text _caption;
 	QRect _captionRect;
 
 	uint64 _animStarted;
 
-	int32 _width, _x, _y, _w, _h, _xStart, _yStart;
-	int32 _zoom; // < 0 - out, 0 - none, > 0 - in
-	float64 _zoomToScreen; // for documents
+	int _width = 0;
+	int _x = 0, _y = 0, _w = 0, _h = 0;
+	int _xStart = 0, _yStart = 0;
+	int _zoom = 0; // < 0 - out, 0 - none, > 0 - in
+	float64 _zoomToScreen = 0.; // for documents
 	QPoint _mStart;
-	bool _pressed;
-	int32 _dragging;
+	bool _pressed = false;
+	int32 _dragging = 0;
 	QPixmap _current;
-	ClipReader *_gif;
-	int32 _full; // -1 - thumb, 0 - medium, 1 - full
+	std_::unique_ptr<Media::Clip::Reader> _gif;
+	int32 _full = -1; // -1 - thumb, 0 - medium, 1 - full
+
+	// Video without audio stream playback information.
+	bool _videoIsSilent = false;
+	bool _videoPaused = false;
+	bool _videoStopped = false;
+	int64 _videoPositionMs = 0;
+	int64 _videoDurationMs = 0;
+	int32 _videoFrequencyMs = 1000; // 1000 ms per second.
 
 	bool fileShown() const;
 	bool gifShown() const;
@@ -157,26 +225,40 @@ private:
 	style::sprite _docIcon;
 	style::color _docIconColor;
 	QString _docName, _docSize, _docExt;
-	int32 _docNameWidth, _docSizeWidth, _docExtWidth;
+	int _docNameWidth = 0, _docSizeWidth = 0, _docExtWidth = 0;
 	QRect _docRect, _docIconRect;
-	int32 _docThumbx, _docThumby, _docThumbw;
-	RadialAnimation _docRadial;
+	int _docThumbx = 0, _docThumby = 0, _docThumbw = 0;
 	LinkButton _docDownload, _docSaveAs, _docCancel;
 
-	History *_migrated, *_history; // if conversation photos or files overview
-	PeerData *_peer;
-	UserData *_user; // if user profile photos overview
+	QRect _photoRadialRect;
+	RadialAnimation _radial;
 
-	PeerData *_from;
+	History *_migrated = nullptr;
+	History *_history = nullptr; // if conversation photos or files overview
+	PeerData *_peer = nullptr;
+	UserData *_user = nullptr; // if user profile photos overview
+
+	// There can be additional first photo in chat photos overview, that is not
+	// in the _history->overview[OverviewChatPhotos] (if the item was deleted).
+	PhotoData *_additionalChatPhoto = nullptr;
+
+	// We save the information about the reason of the current mediaview show:
+	// did we open a peer profile photo or a photo from some message.
+	// We use it when trying to delete a photo: if we've opened a peer photo,
+	// then we'll delete group photo instead of the corresponding message.
+	bool _firstOpenedPeerPhoto = false;
+
+	PeerData *_from = nullptr;
 	Text _fromName;
 
-	int32 _index; // index in photos or files array, -1 if just photo
-	MsgId _msgid; // msgId of current photo or file
-	bool _msgmigrated; // msgId is from _migrated history
-	ChannelId _channel;
-	bool _canForward, _canDelete;
+	int _index = -1; // index in photos or files array, -1 if just photo
+	MsgId _msgid = 0; // msgId of current photo or file
+	bool _msgmigrated = false; // msgId is from _migrated history
+	ChannelId _channel = NoChannel;
+	bool _canForward = false;
+	bool _canDelete = false;
 
-	mtpRequestId _loadRequest;
+	mtpRequestId _loadRequest = 0;
 
 	enum OverState {
 		OverNone,
@@ -189,10 +271,12 @@ private:
 		OverSave,
 		OverMore,
 		OverIcon,
+		OverVideo,
 	};
-	OverState _over, _down;
+	OverState _over = OverNone;
+	OverState _down = OverNone;
 	QPoint _lastAction, _lastMouseMovePos;
-	bool _ignoringDropdown;
+	bool _ignoringDropdown = false;
 
 	Animation _a_state;
 
@@ -202,26 +286,27 @@ private:
 		ControlsHiding,
 		ControlsHidden,
 	};
-	ControlsState _controlsState;
-	uint64 _controlsAnimStarted;
+	ControlsState _controlsState = ControlsShown;
+	uint64 _controlsAnimStarted = 0;
 	QTimer _controlsHideTimer;
 	anim::fvalue a_cOpacity;
+	bool _mousePressed = false;
 
-	PopupMenu *_menu;
+	PopupMenu *_menu = nullptr;
 	Dropdown _dropdown;
 	IconedButton *_btnSaveCancel, *_btnToMessage, *_btnShowInFolder, *_btnSaveAs, *_btnCopy, *_btnForward, *_btnDelete, *_btnViewAll;
 	QList<IconedButton*> _btns;
 
-	bool _receiveMouse;
+	bool _receiveMouse = true;
 
-	bool _touchPress, _touchMove, _touchRightButton;
+	bool _touchPress = false, _touchMove = false, _touchRightButton = false;
 	QTimer _touchTimer;
 	QPoint _touchStart;
 	QPoint _accumScroll;
 
 	QString _saveMsgFilename;
-	uint64 _saveMsgStarted;
-	anim::fvalue _saveMsgOpacity;
+	uint64 _saveMsgStarted = 0;
+	anim::fvalue _saveMsgOpacity = { 0 };
 	QRect _saveMsg;
 	QTimer _saveMsgUpdater;
 	Text _saveMsgText;
@@ -233,7 +318,6 @@ private:
 
 	void updateOverRect(OverState state);
 	bool updateOverState(OverState newState);
-	float64 overLevel(OverState control);
-	QColor overColor(const QColor &a, float64 ca, const QColor &b, float64 cb);
+	float64 overLevel(OverState control) const;
 
 };
