@@ -25,7 +25,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 class AppClass;
 class MainWindow;
 class MainWidget;
-class SettingsWidget;
 class ApiWrap;
 class FileUploader;
 
@@ -42,13 +41,10 @@ typedef QHash<Media::Clip::Reader*, HistoryItem*> GifItems;
 typedef QHash<PhotoId, PhotoData*> PhotosData;
 typedef QHash<DocumentId, DocumentData*> DocumentsData;
 
-class LayeredWidget;
-
 namespace App {
 	AppClass *app();
 	MainWindow *wnd();
 	MainWidget *main();
-	SettingsWidget *settings();
 	bool passcoded();
 	FileUploader *uploader();
 	ApiWrap *api();

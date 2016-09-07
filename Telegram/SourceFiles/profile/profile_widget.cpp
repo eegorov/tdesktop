@@ -41,6 +41,7 @@ Widget::Widget(QWidget *parent, PeerData *peer) : Window::SectionWidget(parent)
 	_fixedBarShadow->setMode(ToggleableShadow::Mode::HiddenFast);
 	_fixedBarShadow->raise();
 	updateAdaptiveLayout();
+	subscribe(Adaptive::Changed(), [this]() { updateAdaptiveLayout(); });
 
 	_scroll->setOwnedWidget(_inner);
 	_scroll->move(0, _fixedBar->height());
@@ -105,8 +106,7 @@ void Widget::resizeEvent(QResizeEvent *e) {
 	QSize scrollSize(width(), height() - _fixedBar->height());
 	if (_scroll->size() != scrollSize) {
 		_scroll->resize(scrollSize);
-//		_inner->resizeToWidth(scrollSize.width(), _scroll->height());
-		_inner->resizeToWidth(scrollSize.width(), _scroll->height() * 2); // testing
+		_inner->resizeToWidth(scrollSize.width(), _scroll->height());
 	}
 	_fixedBar->setHideShareContactButton(_inner->shareContactButtonShown());
 

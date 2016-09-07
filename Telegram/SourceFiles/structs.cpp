@@ -798,6 +798,22 @@ void PhotoCancelClickHandler::onClickImpl() const {
 	}
 }
 
+QString joinList(const QStringList &list, const QString &sep) {
+	QString result;
+	if (list.isEmpty()) return result;
+
+	int32 l = list.size(), s = sep.size() * (l - 1);
+	for (int32 i = 0; i < l; ++i) {
+		s += list.at(i).size();
+	}
+	result.reserve(s);
+	result.append(list.at(0));
+	for (int32 i = 1; i < l; ++i) {
+		result.append(sep).append(list.at(i));
+	}
+	return result;
+}
+
 QString saveFileName(const QString &title, const QString &filter, const QString &prefix, QString name, bool savingAs, const QDir &dir) {
 #ifdef Q_OS_WIN
 	name = name.replace(QRegularExpression(qsl("[\\\\\\/\\:\\*\\?\\\"\\<\\>\\|]")), qsl("_"));
@@ -806,7 +822,7 @@ QString saveFileName(const QString &title, const QString &filter, const QString 
 #elif defined Q_OS_LINUX
 	name = name.replace(QRegularExpression(qsl("[\\/]")), qsl("_"));
 #endif
-	if (cAskDownloadPath() || savingAs) {
+	if (Global::AskDownloadPath() || savingAs) {
 		if (!name.isEmpty() && name.at(0) == QChar::fromLatin1('.')) {
 			name = filedialogDefaultName(prefix, name);
 		} else if (dir.path() != qsl(".")) {
@@ -832,9 +848,9 @@ QString saveFileName(const QString &title, const QString &filter, const QString 
 							QRegularExpressionMatch m = QRegularExpression(qsl(" \\*\\.") + ext + qsl("[\\)\\s]"), QRegularExpression::CaseInsensitiveOption).match(first);
 							if (m.hasMatch() && m.capturedStart() > start + 3) {
 								int32 oldpos = m.capturedStart(), oldend = m.capturedEnd();
-								fil = first.mid(0, start + 3) + ext + qsl(" *.") + first.mid(start + 3, oldpos - start - 3) + first.mid(oldend - 1) + sep + filters.mid(1).join(sep);
+								fil = first.mid(0, start + 3) + ext + qsl(" *.") + first.mid(start + 3, oldpos - start - 3) + first.mid(oldend - 1) + sep + joinList(filters.mid(1), sep);
 							} else {
-								fil = first.mid(0, start + 3) + ext + qsl(" *.") + first.mid(start + 3) + sep + filters.mid(1).join(sep);
+								fil = first.mid(0, start + 3) + ext + qsl(" *.") + first.mid(start + 3) + sep + joinList(filters.mid(1), sep);
 							}
 						}
 					} else {
@@ -851,12 +867,12 @@ QString saveFileName(const QString &title, const QString &filter, const QString 
 	}
 
 	QString path;
-	if (cDownloadPath().isEmpty()) {
+	if (Global::DownloadPath().isEmpty()) {
 		path = psDownloadPath();
-	} else if (cDownloadPath() == qsl("tmp")) {
+	} else if (Global::DownloadPath() == qsl("tmp")) {
 		path = cTempDir();
 	} else {
-		path = cDownloadPath();
+		path = Global::DownloadPath();
 	}
 	if (name.isEmpty()) name = qsl(".unknown");
 	if (name.at(0) == QChar::fromLatin1('.')) {
@@ -1480,7 +1496,7 @@ QString DocumentData::filepath(FilePathResolveType type, bool forceSavingAs) con
 	if (saveFromData) {
 		if (type != FilePathResolveSaveFromData && type != FilePathResolveSaveFromDataSilent) {
 			saveFromData = false;
-		} else if (type == FilePathResolveSaveFromDataSilent && (cAskDownloadPath() || forceSavingAs)) {
+		} else if (type == FilePathResolveSaveFromDataSilent && (Global::AskDownloadPath() || forceSavingAs)) {
 			saveFromData = false;
 		}
 	}
@@ -1620,7 +1636,7 @@ void PeerOpenClickHandler::onClickImpl() const {
 			if (!peer()->asChannel()->isPublic() && !peer()->asChannel()->amIn()) {
 				Ui::showLayer(new InformBox(lang((peer()->isMegagroup()) ? lng_group_not_accessible : lng_channel_not_accessible)));
 			} else {
-				Ui::showPeerHistory(peer(), ShowAtUnreadMsgId);
+				Ui::showPeerHistory(peer(), ShowAtUnreadMsgId, Ui::ShowWay::Forward);
 			}
 		} else {
 			Ui::showPeerProfile(peer());

@@ -28,8 +28,8 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "pspecific.h"
 
 DownloadPathBox::DownloadPathBox() : AbstractBox()
-, _path(cDownloadPath())
-, _pathBookmark(cDownloadPathBookmark())
+, _path(Global::DownloadPath())
+, _pathBookmark(Global::DownloadPathBookmark())
 , _default(this, qsl("dir_type"), 0, lang(lng_download_path_default_radio), _path.isEmpty())
 , _temp(this, qsl("dir_type"), 1, lang(lng_download_path_temp_radio), _path == qsl("tmp"))
 , _dir(this, qsl("dir_type"), 2, lang(lng_download_path_dir_radio), !_path.isEmpty() && _path != qsl("tmp"))
@@ -51,17 +51,6 @@ DownloadPathBox::DownloadPathBox() : AbstractBox()
 	prepare();
 }
 
-void DownloadPathBox::hideAll() {
-	_default.hide();
-	_temp.hide();
-	_dir.hide();
-
-	_pathLink.hide();
-
-	_save.hide();
-	_cancel.hide();
-}
-
 void DownloadPathBox::showAll() {
 	_default.show();
 	_temp.show();
@@ -79,7 +68,7 @@ void DownloadPathBox::showAll() {
 	int32 h = st::boxTitleHeight + st::boxOptionListPadding.top() + _default.height() + st::boxOptionListPadding.top() + _temp.height() + st::boxOptionListPadding.top() + _dir.height();
 	if (_dir.checked()) h += st::downloadPathSkip + _pathLink.height();
 	h += st::boxOptionListPadding.bottom() + st::boxButtonPadding.top() + _save.height() + st::boxButtonPadding.bottom();
-	
+
 	setMaxHeight(h);
 }
 
@@ -101,6 +90,7 @@ void DownloadPathBox::resizeEvent(QResizeEvent *e) {
 
 	_save.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _save.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _save.width() + st::boxButtonPadding.left(), _save.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void DownloadPathBox::onChange() {
@@ -126,8 +116,8 @@ void DownloadPathBox::onChange() {
 void DownloadPathBox::onEditPath() {
 	filedialogInit();
 	QString path, lastPath = cDialogLastPath();
-	if (!cDownloadPath().isEmpty() && cDownloadPath() != qstr("tmp")) {
-		cSetDialogLastPath(cDownloadPath().left(cDownloadPath().size() - (cDownloadPath().endsWith('/') ? 1 : 0)));
+	if (!Global::DownloadPath().isEmpty() && Global::DownloadPath() != qstr("tmp")) {
+		cSetDialogLastPath(Global::DownloadPath().left(Global::DownloadPath().size() - (Global::DownloadPath().endsWith('/') ? 1 : 0)));
 	}
 	if (filedialogGetDir(path, lang(lng_download_path_choose))) {
 		if (!path.isEmpty()) {
@@ -140,10 +130,11 @@ void DownloadPathBox::onEditPath() {
 }
 
 void DownloadPathBox::onSave() {
-	cSetDownloadPath(_default.checked() ? QString() : (_temp.checked() ? qsl("tmp") : _path));
-	cSetDownloadPathBookmark((_default.checked() || _temp.checked()) ? QByteArray() : _pathBookmark);
+	Global::SetDownloadPath(_default.checked() ? QString() : (_temp.checked() ? qsl("tmp") : _path));
+	Global::SetDownloadPathBookmark((_default.checked() || _temp.checked()) ? QByteArray() : _pathBookmark);
 	Local::writeUserSettings();
-	emit closed();
+	Global::RefDownloadPathChanged().notify();
+	onClose();
 }
 
 void DownloadPathBox::setPathText(const QString &text) {

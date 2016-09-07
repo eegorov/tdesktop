@@ -45,8 +45,10 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "localstorage.h"
 #include "apiwrap.h"
 #include "window/top_bar_widget.h"
+#include "window/chat_background.h"
 #include "observer_peer.h"
 #include "playerwidget.h"
+#include "core/qthelp_regex.h"
 
 namespace {
 
@@ -361,7 +363,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		}
 	} else if (noHistoryDisplayed) {
 		QPoint dogPos((width() - st::msgDogImg.pxWidth()) / 2, ((height() - st::msgDogImg.pxHeight()) * 4) / 9);
-		p.drawPixmap(dogPos, *cChatDogImage());
+		p.drawPixmap(dogPos, Window::chatBackground()->dog());
 	}
 	if (!noHistoryDisplayed) {
 		adjustCurrent(r.top());
@@ -2557,9 +2559,7 @@ bool BotKeyboard::forceReply() const {
 	return _forceReply;
 }
 
-void BotKeyboard::resizeToWidth(int newWidth, int maxOuterHeight) {
-	_maxOuterHeight = maxOuterHeight;
-
+int BotKeyboard::resizeGetHeight(int newWidth) {
 	updateStyle(newWidth);
 	_height = st::botKbScroll.deltat + st::botKbScroll.deltab + (_impl ? _impl->naturalHeight() : 0);
 	if (_maximizeSize) {
@@ -2570,10 +2570,7 @@ void BotKeyboard::resizeToWidth(int newWidth, int maxOuterHeight) {
 		int implHeight = _height - (st::botKbScroll.deltat + st::botKbScroll.deltab);
 		_impl->resize(implWidth, implHeight);
 	}
-	QSize newSize(newWidth, _height);
-	if (newSize != size()) {
-		resize(newSize);
-	}
+	return _height;
 }
 
 bool BotKeyboard::maximizeSize() const {
@@ -2760,7 +2757,7 @@ void HistoryHider::paintEvent(QPaintEvent *e) {
 			toText.drawElided(p, box.left() + st::boxPadding.left(), box.top() + st::boxPadding.top(), toTextWidth + 2);
 		} else {
 			int32 w = st::forwardMargins.left() + _chooseWidth + st::forwardMargins.right(), h = st::forwardMargins.top() + st::forwardFont->height + st::forwardMargins.bottom();
-			App::roundRect(p, (width() - w) / 2, (height() - h) / 2, w, h, st::forwardBg, ForwardCorners);
+			App::roundRect(p, (width() - w) / 2, (height() - st::titleHeight - h) / 2, w, h, st::forwardBg, ForwardCorners);
 
 			p.setPen(st::white->p);
 			p.drawText(box, lang(_botAndQuery.isEmpty() ? lng_forward_choose : lng_inline_switch_choose), QTextOption(style::al_center));
@@ -2849,7 +2846,7 @@ void HistoryHider::resizeEvent(QResizeEvent *e) {
 		_send.hide();
 		_cancel.hide();
 	}
-	box = QRect((width() - w) / 2, (height() - h) / 2, w, h);
+	box = QRect((width() - w) / 2, (height() - st::titleHeight - h) / 2, w, h);
 	_send.moveToRight(width() - (box.x() + box.width()) + st::boxButtonPadding.right(), box.y() + h - st::boxButtonPadding.bottom() - _send.height());
 	_cancel.moveToRight(width() - (box.x() + box.width()) + st::boxButtonPadding.right() + _send.width() + st::boxButtonPadding.left(), _send.y());
 }
@@ -2971,9 +2968,8 @@ EntitiesInText entitiesFromTextTags(const FlatTextarea::TagList &tags) {
 	auto mentionStart = qstr("mention://user.");
 	for_const (auto &tag, tags) {
 		if (tag.id.startsWith(mentionStart)) {
-			auto match = QRegularExpression("^(\\d+\\.\\d+)(/|$)").match(tag.id.midRef(mentionStart.size()));
-			if (match.hasMatch()) {
-				result.push_back(EntityInText(EntityInTextMentionName, tag.offset, tag.length, match.captured(1)));
+			if (auto match = qthelp::regex_match("^(\\d+\\.\\d+)(/|$)", tag.id.midRef(mentionStart.size()))) {
+				result.push_back(EntityInText(EntityInTextMentionName, tag.offset, tag.length, match->captured(1)));
 			}
 		}
 	}
@@ -3154,6 +3150,8 @@ HistoryWidget::HistoryWidget(QWidget *parent) : TWidget(parent)
 	connect(&_attachDragPhoto, SIGNAL(dropped(const QMimeData*)), this, SLOT(onPhotoDrop(const QMimeData*)));
 
 	connect(&_updateEditTimeLeftDisplay, SIGNAL(timeout()), this, SLOT(updateField()));
+
+	subscribe(Adaptive::Changed(), [this]() { update(); });
 }
 
 void HistoryWidget::start() {
@@ -3570,8 +3568,17 @@ void HistoryWidget::notify_inlineKeyboardMoved(const HistoryItem *item, int oldK
 	}
 }
 
-bool HistoryWidget::notify_switchInlineBotButtonReceived(const QString &query) {
-	if (UserData *bot = _peer ? _peer->asUser() : nullptr) {
+bool HistoryWidget::notify_switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot, MsgId samePeerReplyTo) {
+	if (samePeerBot) {
+		if (_history) {
+			TextWithTags textWithTags = { '@' + samePeerBot->username + ' ' + query, TextWithTags::Tags() };
+			MessageCursor cursor = { textWithTags.text.size(), textWithTags.text.size(), QFIXED_MAX };
+			auto replyTo = _history->peer->isUser() ? 0 : samePeerReplyTo;
+			_history->setLocalDraft(std_::make_unique<Data::Draft>(textWithTags, replyTo, cursor, false));
+			applyDraft();
+			return true;
+		}
+	} else if (auto bot = _peer ? _peer->asUser() : nullptr) {
 		PeerId toPeerId = bot->botInfo ? bot->botInfo->inlineReturnPeerId : 0;
 		if (!toPeerId) {
 			return false;
@@ -5517,10 +5524,6 @@ void HistoryWidget::doneShow() {
 	}
 }
 
-void HistoryWidget::updateAdaptiveLayout() {
-	update();
-}
-
 void HistoryWidget::animStop() {
 	if (!_a_show.animating()) return;
 	_a_show.stop();
@@ -6309,7 +6312,7 @@ void HistoryWidget::topBarClick() {
 	}
 }
 
-void HistoryWidget::updateOnlineDisplay(int32 x, int32 w) {
+void HistoryWidget::updateOnlineDisplay() {
 	if (!_history) return;
 
 	QString text;
@@ -7742,7 +7745,7 @@ void HistoryWidget::onReplyToMessage() {
 			onReplyToMessage();
 			App::contextItem(to);
 		} else {
-			LayeredWidget *box = 0;
+			LayerWidget *box = nullptr;
 			if (to->type() != HistoryItemMsg || to->serviceMsg()) {
 				box = new InformBox(lang(lng_reply_cant));
 			} else {
@@ -8111,7 +8114,12 @@ void HistoryWidget::updatePreview() {
 		updateMouseTracking();
 		if (_previewData->pendingTill) {
 			_previewTitle.setText(st::msgServiceNameFont, lang(lng_preview_loading), _textNameOptions);
-			_previewDescription.setText(st::msgFont, textClean(_previewLinks.splitRef(' ').at(0).toString()), _textDlgOptions);
+#ifndef OS_MAC_OLD
+			auto linkText = _previewLinks.splitRef(' ').at(0).toString();
+#else // OS_MAC_OLD
+			auto linkText = _previewLinks.split(' ').at(0);
+#endif // OS_MAC_OLD
+			_previewDescription.setText(st::msgFont, textClean(linkText), _textDlgOptions);
 
 			int32 t = (_previewData->pendingTill - unixtime()) * 1000;
 			if (t <= 0) t = 1;
@@ -8688,8 +8696,8 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 	int fromy = (hasTopBar ? (-st::topBarHeight) : 0) + (hasPlayer ? (-st::playerHeight) : 0), x = 0, y = 0;
 	QPixmap cached = App::main()->cachedBackground(fill, x, y);
 	if (cached.isNull()) {
-		const QPixmap &pix(*cChatBackground());
-		if (cTileBackground()) {
+		auto &pix = Window::chatBackground()->image();
+		if (Window::chatBackground()->tile()) {
 			int left = r.left(), top = r.top(), right = r.left() + r.width(), bottom = r.top() + r.height();
 			float64 w = pix.width() / cRetinaFactor(), h = pix.height() / cRetinaFactor();
 			int sx = qFloor(left / w), sy = qFloor((top - fromy) / h), cx = qCeil(right / w), cy = qCeil((bottom - fromy) / h);
@@ -8727,7 +8735,7 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 		if (_scroll.isHidden()) {
 			p.setClipRect(_scroll.geometry());
 			QPoint dogPos((width() - st::msgDogImg.pxWidth()) / 2, ((height() - _field.height() - 2 * st::sendPadding - st::msgDogImg.pxHeight()) * 4) / 9);
-			p.drawPixmap(dogPos, *cChatDogImage());
+			p.drawPixmap(dogPos, Window::chatBackground()->dog());
 		}
 	} else {
 		style::font font(st::msgServiceFont);

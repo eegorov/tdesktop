@@ -21,29 +21,26 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #pragma once
 
 #include "abstractbox.h"
+#include "core/observer.h"
 
 class DownloadPathBox : public AbstractBox {
 	Q_OBJECT
 
 public:
-
 	DownloadPathBox();
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
 
 public slots:
-
 	void onChange();
 	void onEditPath();
 	void onSave();
 
 protected:
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
-	void hideAll();
-	void showAll();
+	void showAll() override;
 
 private:
-
 	void setPathText(const QString &text);
 
 	QString _path;
@@ -52,4 +49,5 @@ private:
 	Radiobutton _default, _temp, _dir;
 	LinkButton _pathLink;
 	BoxButton _save, _cancel;
+
 };

@@ -354,7 +354,6 @@ class BotKeyboard : public TWidget, public AbstractTooltipShower, public ClickHa
 	Q_OBJECT
 
 public:
-
 	BotKeyboard();
 
 	void paintEvent(QPaintEvent *e) override;
@@ -373,7 +372,10 @@ public:
 	bool forceReply() const;
 
 	void step_selected(uint64 ms, bool timer);
-	void resizeToWidth(int newWidth, int maxOuterHeight);
+	void resizeToWidth(int newWidth, int maxOuterHeight) {
+		_maxOuterHeight = maxOuterHeight;
+		return TWidget::resizeToWidth(newWidth);
+	}
 
 	bool maximizeSize() const;
 	bool singleUse() const;
@@ -389,6 +391,9 @@ public:
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;
+
+protected:
+	int resizeGetHeight(int newWidth) override;
 
 private:
 	void updateSelected();
@@ -433,7 +438,6 @@ class HistoryHider : public TWidget {
 	Q_OBJECT
 
 public:
-
 	HistoryHider(MainWidget *parent, bool forwardSelected); // forward messages
 	HistoryHider(MainWidget *parent, UserData *sharedContact); // share contact
 	HistoryHider(MainWidget *parent); // send path from command line argument
@@ -442,11 +446,6 @@ public:
 
 	void step_appearance(float64 ms, bool timer);
 	bool withConfirm() const;
-
-	void paintEvent(QPaintEvent *e);
-	void keyPressEvent(QKeyEvent *e);
-	void mousePressEvent(QMouseEvent *e);
-	void resizeEvent(QResizeEvent *e);
 
 	bool offerPeer(PeerId peer);
 	QString offeredText() const;
@@ -460,17 +459,20 @@ public:
 
 	~HistoryHider();
 
-public slots:
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
+public slots:
 	void startHide();
 	void forward();
 
 signals:
-
 	void forwarded();
 
 private:
-
 	void init();
 	MainWidget *parent();
 
@@ -518,7 +520,7 @@ public:
 EntitiesInText entitiesFromTextTags(const TextWithTags::Tags &tags);
 TextWithTags::Tags textTagsFromEntities(const EntitiesInText &entities);
 
-class HistoryWidget : public TWidget, public RPCSender {
+class HistoryWidget : public TWidget, public RPCSender, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -592,7 +594,7 @@ public:
 	void cancelShareContact();
 
 	void updateControlsVisibility();
-	void updateOnlineDisplay(int32 x, int32 w);
+	void updateOnlineDisplay();
 	void updateOnlineDisplayTimer();
 
 	void onShareContact(const PeerId &peer, UserData *contact);
@@ -612,7 +614,6 @@ public:
 	void step_show(float64 ms, bool timer);
 	void animStop();
 
-	void updateAdaptiveLayout();
 	void doneShow();
 
 	QPoint clampMousePosition(QPoint point);
@@ -720,7 +721,7 @@ public:
 	void notify_inlineBotRequesting(bool requesting);
 	void notify_replyMarkupUpdated(const HistoryItem *item);
 	void notify_inlineKeyboardMoved(const HistoryItem *item, int oldKeyboardTop, int newKeyboardTop);
-	bool notify_switchInlineBotButtonReceived(const QString &query);
+	bool notify_switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot, MsgId samePeerReplyTo);
 	void notify_userIsBotChanged(UserData *user);
 	void notify_migrateUpdated(PeerData *peer);
 	void notify_clipStopperHidden(ClipStopperType type);

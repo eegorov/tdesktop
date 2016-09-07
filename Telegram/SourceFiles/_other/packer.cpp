@@ -23,14 +23,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include <QtCore/QtPlugin>
 
 #ifdef Q_OS_MAC
-Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)
-Q_IMPORT_PLUGIN(QDDSPlugin)
-Q_IMPORT_PLUGIN(QICNSPlugin)
-Q_IMPORT_PLUGIN(QICOPlugin)
-Q_IMPORT_PLUGIN(QTgaPlugin)
-Q_IMPORT_PLUGIN(QTiffPlugin)
-Q_IMPORT_PLUGIN(QWbmpPlugin)
-Q_IMPORT_PLUGIN(QWebpPlugin)
+//Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)
 #endif
 
 bool AlphaChannel = false;
@@ -145,21 +138,10 @@ QString BetaSignature;
 int main(int argc, char *argv[])
 {
 	QString workDir;
-#ifdef Q_OS_MAC
-    if (QDir(QString()).absolutePath() == "/") {
-		QString first = argc ? QString::fromLocal8Bit(argv[0]) : QString();
-		if (!first.isEmpty()) {
-			QFileInfo info(first);
-			if (info.exists()) {
-				QDir result(info.absolutePath() + "/../../..");
-				workDir = result.absolutePath() + '/';
-			}
-		}
-	}
-#endif
 
 	QString remove;
 	int version = 0;
+	bool target32 = false;
 	QFileInfoList files;
 	for (int i = 0; i < argc; ++i) {
 		if (string("-path") == argv[i] && i + 1 < argc) {
@@ -167,6 +149,8 @@ int main(int argc, char *argv[])
 			QFileInfo info(path);
 			files.push_back(info);
 			if (remove.isEmpty()) remove = info.canonicalPath() + "/";
+		} else if (string("-target") == argv[i] && i + 1 < argc) {
+			target32 = (string("mac32") == argv[i + 1]);
 		} else if (string("-version") == argv[i] && i + 1 < argc) {
 			version = QString(argv[i + 1]).toInt();
 		} else if (string("-alpha") == argv[i]) {
@@ -470,11 +454,11 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_WIN
 	QString outName(QString("tupdate%1").arg(BetaVersion ? BetaVersion : version));
 #elif defined Q_OS_MAC
-	QString outName(QString("tmacupd%1").arg(BetaVersion ? BetaVersion : version));
+	QString outName((target32 ? QString("tmac32upd%1") : QString("tmacupd%1")).arg(BetaVersion ? BetaVersion : version));
 #elif defined Q_OS_LINUX32
-    QString outName(QString("tlinux32upd%1").arg(BetaVersion ? BetaVersion : version));
+	QString outName(QString("tlinux32upd%1").arg(BetaVersion ? BetaVersion : version));
 #elif defined Q_OS_LINUX64
-    QString outName(QString("tlinuxupd%1").arg(BetaVersion ? BetaVersion : version));
+	QString outName(QString("tlinuxupd%1").arg(BetaVersion ? BetaVersion : version));
 #else
 #error Unknown platform!
 #endif

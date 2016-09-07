@@ -31,6 +31,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "mainwindow.h"
 #include "apiwrap.h"
 #include "observer_peer.h"
+#include "styles/style_boxes.h"
 
 AddContactBox::AddContactBox(QString fname, QString lname, QString phone) : AbstractBox(st::boxWidth)
 , _save(this, lang(lng_add_contact), st::defaultBoxButton)
@@ -84,15 +85,6 @@ void AddContactBox::initBox() {
 	prepare();
 }
 
-void AddContactBox::hideAll() {
-	_first.hide();
-	_last.hide();
-	_phone.hide();
-	_save.hide();
-	_cancel.hide();
-	_retry.hide();
-}
-
 void AddContactBox::showAll() {
 	_first.show();
 	_last.show();
@@ -101,7 +93,7 @@ void AddContactBox::showAll() {
 	_cancel.show();
 }
 
-void AddContactBox::showDone() {
+void AddContactBox::doSetInnerFocus() {
 	if ((_first.getLastText().isEmpty() && _last.getLastText().isEmpty()) || !_phone.isEnabled()) {
 		(_invertOrder ? _last : _first).setFocus();
 	} else {
@@ -143,6 +135,7 @@ void AddContactBox::resizeEvent(QResizeEvent *e) {
 	_save.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _save.height());
 	_retry.moveToRight(st::boxButtonPadding.right(), _save.y());
 	_cancel.moveToRight(st::boxButtonPadding.right() + (_retry.isHidden() ? _save.width() : _retry.width()) + st::boxButtonPadding.left(), _save.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void AddContactBox::onSubmit() {
@@ -203,7 +196,7 @@ bool AddContactBox::onSaveUserFail(const RPCError &error) {
 	QString firstName = _first.getLastText().trimmed(), lastName = _last.getLastText().trimmed();
 	if (err == "CHAT_TITLE_NOT_MODIFIED") {
 		_user->setName(firstName, lastName, _user->nameOrPhone, _user->username);
-		emit closed();
+		onClose();
 		return true;
 	} else if (err == "NO_CHAT_TITLE") {
 		_first.setFocus();
@@ -243,9 +236,9 @@ void AddContactBox::onImportDone(const MTPcontacts_ImportedContacts &res) {
 }
 
 void AddContactBox::onSaveUserDone(const MTPcontacts_ImportedContacts &res) {
-	const auto &d(res.c_contacts_importedContacts());
+	auto &d = res.c_contacts_importedContacts();
 	App::feedUsers(d.vusers);
-	emit closed();
+	onClose();
 }
 
 void AddContactBox::onRetry() {
@@ -282,22 +275,11 @@ _cancel(this, lang(lng_cancel), st::cancelBoxButton) {
 	prepare();
 }
 
-void NewGroupBox::hideAll() {
-	_group.hide();
-	_channel.hide();
-	_cancel.hide();
-	_next.hide();
-}
-
 void NewGroupBox::showAll() {
 	_group.show();
 	_channel.show();
 	_cancel.show();
 	_next.show();
-}
-
-void NewGroupBox::showDone() {
-	setFocus();
 }
 
 void NewGroupBox::keyPressEvent(QKeyEvent *e) {
@@ -327,6 +309,7 @@ void NewGroupBox::resizeEvent(QResizeEvent *e) {
 
 	_next.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _next.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _next.width() + st::boxButtonPadding.left(), _next.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void NewGroupBox::onNext() {
@@ -364,13 +347,6 @@ _creationRequestId(0), _createdChannel(0) {
 	prepare();
 }
 
-void GroupInfoBox::hideAll() {
-	_title.hide();
-	_description.hide();
-	_cancel.hide();
-	_next.hide();
-}
-
 void GroupInfoBox::showAll() {
 	_title.show();
 	if (_creating == CreatingGroupChannel) {
@@ -382,7 +358,7 @@ void GroupInfoBox::showAll() {
 	_next.show();
 }
 
-void GroupInfoBox::showDone() {
+void GroupInfoBox::doSetInnerFocus() {
 	_title.setFocus();
 }
 
@@ -426,6 +402,7 @@ void GroupInfoBox::resizeEvent(QResizeEvent *e) {
 
 	_next.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _next.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _next.width() + st::boxButtonPadding.left(), _next.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void GroupInfoBox::mouseMoveEvent(QMouseEvent *e) {
@@ -611,9 +588,6 @@ SetupChannelBox::SetupChannelBox(ChannelData *channel, bool existing) : Abstract
 , _linkOver(false)
 , _save(this, lang(lng_settings_save), st::defaultBoxButton)
 , _skip(this, lang(existing ? lng_cancel : lng_create_group_skip), st::cancelBoxButton)
-, _tooMuchUsernames(false)
-, _saveRequestId(0)
-, _checkRequestId(0)
 , a_goodOpacity(0, 0)
 , _a_goodFade(animation(this, &SetupChannelBox::step_goodFade)) {
 	setMouseTracking(true);
@@ -637,14 +611,6 @@ SetupChannelBox::SetupChannelBox(ChannelData *channel, bool existing) : Abstract
 	prepare();
 }
 
-void SetupChannelBox::hideAll() {
-	_public.hide();
-	_private.hide();
-	_link.hide();
-	_save.hide();
-	_skip.hide();
-}
-
 void SetupChannelBox::showAll() {
 	_public.show();
 	_private.show();
@@ -657,8 +623,12 @@ void SetupChannelBox::showAll() {
 	_skip.show();
 }
 
-void SetupChannelBox::showDone() {
-	_link.setFocus();
+void SetupChannelBox::doSetInnerFocus() {
+	if (_link.isHidden()) {
+		setFocus();
+	} else {
+		_link.setFocus();
+	}
 }
 
 void SetupChannelBox::updateMaxHeight() {
@@ -740,6 +710,7 @@ void SetupChannelBox::resizeEvent(QResizeEvent *e) {
 
 	_save.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _save.height());
 	_skip.moveToRight(st::boxButtonPadding.right() + _save.width() + st::boxButtonPadding.left(), _save.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void SetupChannelBox::mouseMoveEvent(QMouseEvent *e) {
@@ -747,7 +718,6 @@ void SetupChannelBox::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void SetupChannelBox::mousePressEvent(QMouseEvent *e) {
-	mouseMoveEvent(e);
 	if (_linkOver) {
 		Application::clipboard()->setText(_channel->inviteLink());
 		_goodTextLink = lang(lng_create_channel_link_copied);
@@ -863,7 +833,12 @@ void SetupChannelBox::onPrivacyChange() {
 	if (_public.checked()) {
 		if (_tooMuchUsernames) {
 			_private.setChecked(true);
-			Ui::showLayer(new InformBox(lang(lng_channels_too_much_public)), KeepOtherLayers);
+			Ui::showLayer(new RevokePublicLinkBox([this, weak_this = weakThis()]() {
+				if (!weak_this) return;
+				_tooMuchUsernames = false;
+				_public.setChecked(true);
+				onCheck();
+			}), KeepOtherLayers);
 			return;
 		}
 		_link.show();
@@ -930,7 +905,7 @@ bool SetupChannelBox::onCheckFail(const RPCError &error) {
 		return true;
 	} else if (err == qstr("CHANNELS_ADMIN_PUBLIC_TOO_MUCH")) {
 		if (_existing) {
-			Ui::showLayer(new InformBox(lang(lng_channels_too_much_public_existing)));
+			showRevokePublicLinkBoxForEdit();
 		} else {
 			_tooMuchUsernames = true;
 			_private.setChecked(true);
@@ -951,6 +926,13 @@ bool SetupChannelBox::onCheckFail(const RPCError &error) {
 	return true;
 }
 
+void SetupChannelBox::showRevokePublicLinkBoxForEdit() {
+	onClose();
+	Ui::showLayer(new RevokePublicLinkBox([channel = _channel, existing = _existing]() {
+		Ui::showLayer(new SetupChannelBox(channel, existing), KeepOtherLayers);
+	}), KeepOtherLayers);
+}
+
 bool SetupChannelBox::onFirstCheckFail(const RPCError &error) {
 	if (MTP::isDefaultHandledError(error)) return false;
 
@@ -961,7 +943,7 @@ bool SetupChannelBox::onFirstCheckFail(const RPCError &error) {
 		return true;
 	} else if (err == qstr("CHANNELS_ADMIN_PUBLIC_TOO_MUCH")) {
 		if (_existing) {
-			Ui::showLayer(new InformBox(lang(lng_channels_too_much_public_existing)));
+			showRevokePublicLinkBoxForEdit();
 		} else {
 			_tooMuchUsernames = true;
 			_private.setChecked(true);
@@ -1007,13 +989,6 @@ _requestId(0) {
 	prepare();
 }
 
-void EditNameTitleBox::hideAll() {
-	_first.hide();
-	_last.hide();
-	_save.hide();
-	_cancel.hide();
-}
-
 void EditNameTitleBox::showAll() {
 	_first.show();
 	if (_peer->isChat()) {
@@ -1025,7 +1000,7 @@ void EditNameTitleBox::showAll() {
 	_cancel.show();
 }
 
-void EditNameTitleBox::showDone() {
+void EditNameTitleBox::doSetInnerFocus() {
 	(_invertOrder ? _last : _first).setFocus();
 }
 
@@ -1074,6 +1049,7 @@ void EditNameTitleBox::resizeEvent(QResizeEvent *e) {
 
 	_save.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _save.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _save.width() + st::boxButtonPadding.left(), _save.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void EditNameTitleBox::onSave() {
@@ -1105,7 +1081,7 @@ void EditNameTitleBox::onSave() {
 
 void EditNameTitleBox::onSaveSelfDone(const MTPUser &user) {
 	App::feedUsers(MTP_vector<MTPUser>(1, user));
-	emit closed();
+	onClose();
 }
 
 bool EditNameTitleBox::onSaveSelfFail(const RPCError &error) {
@@ -1115,7 +1091,7 @@ bool EditNameTitleBox::onSaveSelfFail(const RPCError &error) {
 	QString first = textOneLine(_first.getLastText().trimmed()), last = textOneLine(_last.getLastText().trimmed());
 	if (err == "NAME_NOT_MODIFIED") {
 		App::self()->setName(first, last, QString(), textOneLine(App::self()->username));
-		emit closed();
+		onClose();
 		return true;
 	} else if (err == "FIRSTNAME_INVALID") {
 		_first.setFocus();
@@ -1139,7 +1115,7 @@ bool EditNameTitleBox::onSaveChatFail(const RPCError &error) {
 		if (auto chatData = _peer->asChat()) {
 			chatData->setName(_sentName);
 		}
-		emit closed();
+		onClose();
 		return true;
 	} else if (err == qstr("NO_CHAT_TITLE")) {
 		_first.setFocus();
@@ -1152,7 +1128,7 @@ bool EditNameTitleBox::onSaveChatFail(const RPCError &error) {
 
 void EditNameTitleBox::onSaveChatDone(const MTPUpdates &updates) {
 	App::main()->sentUpdatesReceived(updates);
-	emit closed();
+	onClose();
 }
 
 EditChannelBox::EditChannelBox(ChannelData *channel) : AbstractBox()
@@ -1188,15 +1164,6 @@ EditChannelBox::EditChannelBox(ChannelData *channel) : AbstractBox()
 	prepare();
 }
 
-void EditChannelBox::hideAll() {
-	_title.hide();
-	_description.hide();
-	_sign.hide();
-	_save.hide();
-	_cancel.hide();
-	_publicLink.hide();
-}
-
 void EditChannelBox::showAll() {
 	_title.show();
 	_description.show();
@@ -1214,7 +1181,7 @@ void EditChannelBox::showAll() {
 	}
 }
 
-void EditChannelBox::showDone() {
+void EditChannelBox::doSetInnerFocus() {
 	_title.setFocus();
 }
 
@@ -1276,6 +1243,7 @@ void EditChannelBox::resizeEvent(QResizeEvent *e) {
 
 	_save.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _save.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _save.width() + st::boxButtonPadding.left(), _save.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void EditChannelBox::onSave() {
@@ -1382,3 +1350,158 @@ void EditChannelBox::onSaveSignDone(const MTPUpdates &updates) {
 	onClose();
 }
 
+RevokePublicLinkBox::RevokePublicLinkBox(base::lambda_unique<void()> &&revokeCallback) : AbstractBox()
+, _rowHeight(st::contactsPadding.top() + st::contactsPhotoSize + st::contactsPadding.bottom())
+, _revokeWidth(st::normalFont->width(lang(lng_channels_too_much_public_revoke)))
+, _aboutRevoke(this, lang(lng_channels_too_much_public_about), FlatLabel::InitType::Simple, st::aboutRevokePublicLabel)
+, _cancel(this, lang(lng_cancel), st::cancelBoxButton)
+, _revokeCallback(std_::move(revokeCallback)) {
+	setMouseTracking(true);
+
+	MTP::send(MTPchannels_GetAdminedPublicChannels(), rpcDone(&RevokePublicLinkBox::getPublicDone), rpcFail(&RevokePublicLinkBox::getPublicFail));
+
+	updateMaxHeight();
+
+	connect(App::wnd(), SIGNAL(imageLoaded()), this, SLOT(update()));
+	connect(_cancel, SIGNAL(clicked()), this, SLOT(onClose()));
+
+	prepare();
+}
+
+void RevokePublicLinkBox::updateMaxHeight() {
+	_rowsTop = st::boxPadding.top() + _aboutRevoke->height() + st::boxPadding.top();
+	setMaxHeight(_rowsTop + (5 * _rowHeight) + st::boxButtonPadding.top() + _cancel->height() + st::boxButtonPadding.bottom());
+}
+
+void RevokePublicLinkBox::mouseMoveEvent(QMouseEvent *e) {
+	updateSelected();
+}
+
+void RevokePublicLinkBox::updateSelected() {
+	auto point = mapFromGlobal(QCursor::pos());
+	PeerData *selected = nullptr;
+	auto top = _rowsTop;
+	for_const (auto &row, _rows) {
+		auto revokeLink = rtlrect(width() - st::contactsPadding.right() - st::contactsCheckPosition.x() - _revokeWidth, top + st::contactsPadding.top() + (st::contactsPhotoSize - st::normalFont->height) / 2, _revokeWidth, st::normalFont->height, width());
+		if (revokeLink.contains(point)) {
+			selected = row.peer;
+			break;
+		}
+		top += _rowHeight;
+	}
+	if (selected != _selected) {
+		_selected = selected;
+		setCursor((_selected || _pressed) ? style::cur_pointer : style::cur_default);
+		update();
+	}
+}
+
+void RevokePublicLinkBox::mousePressEvent(QMouseEvent *e) {
+	if (_pressed != _selected) {
+		_pressed = _selected;
+		update();
+	}
+}
+
+void RevokePublicLinkBox::mouseReleaseEvent(QMouseEvent *e) {
+	auto pressed = createAndSwap(_pressed);
+	setCursor((_selected || _pressed) ? style::cur_pointer : style::cur_default);
+	if (pressed && pressed == _selected) {
+		auto text_method = pressed->isMegagroup() ? lng_channels_too_much_public_revoke_confirm_group : lng_channels_too_much_public_revoke_confirm_channel;
+		auto text = text_method(lt_link, qsl("telegram.me/") + pressed->userName(), lt_group, pressed->name);
+		weakRevokeConfirmBox = new ConfirmBox(text, lang(lng_channels_too_much_public_revoke));
+		weakRevokeConfirmBox->setConfirmedCallback([this, weak_this = weakThis(), pressed]() {
+			if (!weak_this) return;
+			if (_revokeRequestId) return;
+			_revokeRequestId = MTP::send(MTPchannels_UpdateUsername(pressed->asChannel()->inputChannel, MTP_string("")), rpcDone(&RevokePublicLinkBox::revokeLinkDone), rpcFail(&RevokePublicLinkBox::revokeLinkFail));
+		});
+		Ui::showLayer(weakRevokeConfirmBox, KeepOtherLayers);
+	}
+}
+
+void RevokePublicLinkBox::paintEvent(QPaintEvent *e) {
+	Painter p(this);
+	if (paint(p)) return;
+
+	p.translate(0, _rowsTop);
+	for_const (auto &row, _rows) {
+		paintChat(p, row, (row.peer == _selected), (row.peer == _pressed));
+		p.translate(0, _rowHeight);
+	}
+}
+
+void RevokePublicLinkBox::resizeEvent(QResizeEvent *e) {
+	_aboutRevoke->moveToLeft(st::boxPadding.left(), st::boxPadding.top());
+	_cancel->moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _cancel->height());
+	AbstractBox::resizeEvent(e);
+}
+
+void RevokePublicLinkBox::paintChat(Painter &p, const ChatRow &row, bool selected, bool pressed) const {
+	auto peer = row.peer;
+	peer->paintUserpicLeft(p, st::contactsPhotoSize, st::contactsPadding.left(), st::contactsPadding.top(), width());
+
+	p.setPen(st::black);
+
+	int32 namex = st::contactsPadding.left() + st::contactsPhotoSize + st::contactsPadding.left();
+	int32 namew = width() - namex - st::contactsPadding.right() - (_revokeWidth + st::contactsCheckPosition.x() * 2);
+	if (peer->isVerified()) {
+		namew -= st::verifiedCheck.pxWidth() + st::verifiedCheckPos.x();
+		p.drawSpriteLeft(namex + qMin(row.name.maxWidth(), namew) + st::verifiedCheckPos.x(), st::contactsPadding.top() + st::contactsNameTop + st::verifiedCheckPos.y(), width(), st::verifiedCheck);
+	}
+	row.name.drawLeftElided(p, namex, st::contactsPadding.top() + st::contactsNameTop, namew, width());
+
+	p.setFont(selected ? st::linkOverFont : st::linkFont);
+	p.setPen(pressed ? st::btnDefLink.downColor : st::btnDefLink.color->p);
+	p.drawTextRight(st::contactsPadding.right() + st::contactsCheckPosition.x(), st::contactsPadding.top() + (st::contactsPhotoSize - st::normalFont->height) / 2, width(), lang(lng_channels_too_much_public_revoke), _revokeWidth);
+
+	p.setPen(st::contactsStatusFg);
+	textstyleSet(&st::revokePublicLinkStatusStyle);
+	row.status.drawLeftElided(p, namex, st::contactsPadding.top() + st::contactsStatusTop, namew, width());
+	textstyleRestore();
+}
+
+void RevokePublicLinkBox::getPublicDone(const MTPmessages_Chats &result) {
+	if (result.type() == mtpc_messages_chats) {
+		auto &chats = result.c_messages_chats().vchats;
+		for_const (auto &chat, chats.c_vector().v) {
+			if (auto peer = App::feedChat(chat)) {
+				if (!peer->isChannel() || peer->userName().isEmpty()) continue;
+
+				ChatRow row;
+				row.peer = peer;
+				row.name.setText(st::contactsNameFont, peer->name, _textNameOptions);
+				textstyleSet(&st::revokePublicLinkStatusStyle);
+				row.status.setText(st::normalFont, qsl("telegram.me/") + textcmdLink(1, peer->userName()), _textDlgOptions);
+				textstyleRestore();
+				_rows.push_back(std_::move(row));
+			}
+		}
+	}
+	update();
+}
+
+bool RevokePublicLinkBox::getPublicFail(const RPCError &error) {
+	if (MTP::isDefaultHandledError(error)) {
+		return false;
+	}
+
+	return true;
+}
+
+void RevokePublicLinkBox::revokeLinkDone(const MTPBool &result) {
+	if (weakRevokeConfirmBox) {
+		weakRevokeConfirmBox->onClose();
+	}
+	onClose();
+	if (_revokeCallback) {
+		_revokeCallback();
+	}
+}
+
+bool RevokePublicLinkBox::revokeLinkFail(const RPCError &error) {
+	if (MTP::isDefaultHandledError(error)) {
+		return false;
+	}
+
+	return true;
+}

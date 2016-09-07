@@ -39,7 +39,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "fileuploader.h"
 #include "application.h"
 #include "mainwindow.h"
-#include "settingswidget.h"
 #include "inline_bots/inline_bot_layout_item.h"
 #include "boxes/confirmbox.h"
 #include "boxes/stickersetbox.h"
@@ -51,6 +50,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "media/media_audio.h"
 #include "core/qthelp_regex.h"
 #include "core/qthelp_url.h"
+#include "window/chat_background.h"
 
 StackItemSection::StackItemSection(std_::unique_ptr<Window::SectionMemento> &&memento) : StackItem(nullptr)
 , _memento(std_::move(memento)) {
@@ -103,7 +103,15 @@ MainWidget::MainWidget(MainWindow *window) : TWidget(window)
 	_webPageUpdater.setSingleShot(true);
 	connect(&_webPageUpdater, SIGNAL(timeout()), this, SLOT(webPagesUpdate()));
 
+	subscribe(Window::chatBackground(), [this](const Window::ChatBackgroundUpdate &update) {
+		using Update = Window::ChatBackgroundUpdate;
+		if (update.type == Update::Type::New || update.type == Update::Type::Changed) {
+			clearCachedBackground();
+		}
+	});
 	connect(&_cacheBackgroundTimer, SIGNAL(timeout()), this, SLOT(onCacheBackground()));
+
+	subscribe(Adaptive::Changed(), [this]() { updateAdaptiveLayout(); });
 
 	_dialogs->show();
 	if (Adaptive::OneColumn()) {
@@ -444,8 +452,8 @@ void MainWidget::notify_inlineKeyboardMoved(const HistoryItem *item, int oldKeyb
 	_history->notify_inlineKeyboardMoved(item, oldKeyboardTop, newKeyboardTop);
 }
 
-bool MainWidget::notify_switchInlineBotButtonReceived(const QString &query) {
-	return _history->notify_switchInlineBotButtonReceived(query);
+bool MainWidget::notify_switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot, MsgId samePeerReplyTo) {
+	return _history->notify_switchInlineBotButtonReceived(query, samePeerBot, samePeerReplyTo);
 }
 
 void MainWidget::notify_userIsBotChanged(UserData *bot) {
@@ -535,7 +543,7 @@ void MainWidget::noHider(HistoryHider *destroyed) {
 		_hider = nullptr;
 		if (Adaptive::OneColumn()) {
 			if (_forwardConfirm) {
-				_forwardConfirm->startHide();
+				_forwardConfirm->onClose();
 				_forwardConfirm = 0;
 			}
 			onHistoryShown(_history->history(), _history->msgId());
@@ -589,9 +597,11 @@ void MainWidget::hiderLayer(HistoryHider *h) {
 		} else {
 			_history->hide();
 		}
-		_dialogs->show();
-		resizeEvent(0);
-		_dialogs->showAnimated(Window::SlideDirection::FromLeft, animationParams);
+		if (_dialogs->isHidden()) {
+			_dialogs->show();
+			resizeEvent(0);
+			_dialogs->showAnimated(Window::SlideDirection::FromLeft, animationParams);
+		}
 		App::wnd()->getTitle()->updateBackButton();
 	} else {
 		_hider->show();
@@ -693,7 +703,7 @@ void MainWidget::offerPeer(PeerId peer) {
 void MainWidget::onForwardCancel(QObject *obj) {
 	if (!obj || obj == _forwardConfirm) {
 		if (_forwardConfirm) {
-			if (!obj) _forwardConfirm->startHide();
+			if (!obj) _forwardConfirm->onClose();
 			_forwardConfirm = 0;
 		}
 		if (_hider) _hider->offerPeer(0);
@@ -1005,8 +1015,8 @@ bool MainWidget::sendMessageFail(const RPCError &error) {
 }
 
 void MainWidget::onCacheBackground() {
-	const QPixmap &bg(*cChatBackground());
-	if (cTileBackground()) {
+	auto &bg = Window::chatBackground()->image();
+	if (Window::chatBackground()->tile()) {
 		QImage result(_willCacheFor.width() * cIntRetinaFactor(), _willCacheFor.height() * cIntRetinaFactor(), QImage::Format_RGB32);
         result.setDevicePixelRatio(cRetinaFactor());
 		{
@@ -1506,13 +1516,10 @@ void MainWidget::loadFailed(mtpFileLoader *loader, bool started, const char *ret
 }
 
 void MainWidget::onDownloadPathSettings() {
-	cSetDownloadPath(QString());
-	cSetDownloadPathBookmark(QByteArray());
-	DownloadPathBox *box = new DownloadPathBox();
-	if (App::wnd() && App::wnd()->settingsWidget()) {
-		connect(box, SIGNAL(closed()), App::wnd()->settingsWidget(), SLOT(onDownloadPathEdited()));
-	}
-	Ui::showLayer(box);
+	Global::SetDownloadPath(QString());
+	Global::SetDownloadPathBookmark(QByteArray());
+	Ui::showLayer(new DownloadPathBox());
+	Global::RefDownloadPathChanged().notify();
 }
 
 void MainWidget::onSharePhoneWithBot(PeerData *recipient) {
@@ -1684,8 +1691,7 @@ void MainWidget::onParentResize(const QSize &newSize) {
 
 void MainWidget::updateOnlineDisplay() {
 	if (this != App::main()) return;
-	_history->updateOnlineDisplay(_history->x(), width() - _history->x() - st::sysBtnDelta * 2 - st::sysCls.img.pxWidth() - st::sysRes.img.pxWidth() - st::sysMin.img.pxWidth());
-	if (App::wnd()->settingsWidget()) App::wnd()->settingsWidget()->updateOnlineDisplay();
+	_history->updateOnlineDisplay();
 }
 
 void MainWidget::onSendFileConfirm(const FileLoadResultPtr &file, bool ctrlShiftEnter) {
@@ -1769,6 +1775,7 @@ bool MainWidget::isIdle() const {
 void MainWidget::clearCachedBackground() {
 	_cachedBackground = QPixmap();
 	_cacheBackgroundTimer.stop();
+	update();
 }
 
 QPixmap MainWidget::cachedBackground(const QRect &forRect, int &x, int &y) {
@@ -1785,7 +1792,7 @@ QPixmap MainWidget::cachedBackground(const QRect &forRect, int &x, int &y) {
 }
 
 void MainWidget::backgroundParams(const QRect &forRect, QRect &to, QRect &from) const {
-	const QSize &bg(cChatBackground()->size());
+	auto bg = Window::chatBackground()->image().size();
 	if (uint64(bg.width()) * forRect.height() > uint64(bg.height()) * forRect.width()) {
 		float64 pxsize = forRect.height() / float64(bg.height());
 		int takewidth = qCeil(forRect.width() / pxsize);
@@ -2031,6 +2038,11 @@ void MainWidget::ui_showPeerHistory(quint64 peerId, qint32 showAtMsgId, Ui::Show
 				break;
 			}
 		}
+		if (auto historyPeer = _history->peer()) {
+			if (way == Ui::ShowWay::Forward && historyPeer->id == peerId) {
+				way = Ui::ShowWay::ClearStack;
+			}
+		}
 	}
 
 	if (back || (way == Ui::ShowWay::ClearStack)) {
@@ -2044,7 +2056,7 @@ void MainWidget::ui_showPeerHistory(quint64 peerId, qint32 showAtMsgId, Ui::Show
 
 	PeerData *wasActivePeer = activePeer();
 
-	Ui::hideLayer();
+	Ui::hideSettingsAndLayer();
 	if (_hider) {
 		_hider->startHide();
 		_hider = nullptr;
@@ -2193,7 +2205,7 @@ void MainWidget::showMediaOverview(PeerData *peer, MediaOverviewType type, bool 
 		peer = peer->migrateTo();
 	}
 
-	App::wnd()->hideSettings();
+	Ui::hideSettingsAndLayer();
 	if (_overview && _overview->peer() == peer) {
 		if (_overview->type() != type) {
 			_overview->switchType(type);
@@ -2246,7 +2258,7 @@ void MainWidget::showMediaOverview(PeerData *peer, MediaOverviewType type, bool 
 }
 
 void MainWidget::showWideSection(const Window::SectionMemento &memento) {
-	App::wnd()->hideSettings();
+	Ui::hideSettingsAndLayer();
 	if (_wideSection && _wideSection->showInternal(&memento)) {
 		return;
 	}
@@ -2597,12 +2609,14 @@ void MainWidget::showAll() {
 			_dialogs->show();
 			_history->hide();
 		}
-		if (_wideSection) {
-			_topBar->hide();
-			_dialogs->hide();
-		} else if (!selectingPeer() && (_overview || _history->peer())) {
-			_topBar->show();
-			_dialogs->hide();
+		if (!selectingPeer()) {
+			if (_wideSection) {
+				_topBar->hide();
+				_dialogs->hide();
+			} else if (_overview || _history->peer()) {
+				_topBar->show();
+				_dialogs->hide();
+			}
 		}
 	} else {
 		_sideShadow.show();
@@ -2690,11 +2704,6 @@ void MainWidget::keyPressEvent(QKeyEvent *e) {
 void MainWidget::updateAdaptiveLayout() {
 	showAll();
 	_sideShadow.setVisible(!Adaptive::OneColumn());
-	if (_wideSection) {
-		_wideSection->updateAdaptiveLayout();
-	}
-	_topBar->updateAdaptiveLayout();
-	_history->updateAdaptiveLayout();
 }
 
 bool MainWidget::needBackButton() {
@@ -3447,7 +3456,7 @@ void MainWidget::usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, c
 				_history->resizeEvent(0);
 			}
 		}
-		Ui::showPeerHistory(peer->id, msgId);
+		Ui::showPeerHistory(peer->id, msgId, Ui::ShowWay::Forward);
 	}
 }
 

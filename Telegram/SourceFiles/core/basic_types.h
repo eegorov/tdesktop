@@ -33,13 +33,6 @@ T *getPointerAndReset(T *&ptr) {
 	return result;
 }
 
-template <typename T>
-T createAndSwap(T &value) {
-	T result = T();
-	std::swap(result, value);
-	return result;
-}
-
 struct NullType {
 };
 
@@ -175,6 +168,8 @@ template <typename T, size_t N> char(&ArraySizeHelper(T(&array)[N]))[N];
 
 // For QFlags<> declared in private section of a class we need to declare
 // operators from Q_DECLARE_OPERATORS_FOR_FLAGS as friend functions.
+#ifndef OS_MAC_OLD
+
 #define Q_DECLARE_FRIEND_INCOMPATIBLE_FLAGS(Flags) \
 friend Q_DECL_CONSTEXPR QIncompatibleFlag operator|(Flags::enum_type f1, int f2) Q_DECL_NOTHROW;
 
@@ -182,6 +177,18 @@ friend Q_DECL_CONSTEXPR QIncompatibleFlag operator|(Flags::enum_type f1, int f2)
 friend Q_DECL_CONSTEXPR QFlags<Flags::enum_type> operator|(Flags::enum_type f1, Flags::enum_type f2) Q_DECL_NOTHROW; \
 friend Q_DECL_CONSTEXPR QFlags<Flags::enum_type> operator|(Flags::enum_type f1, QFlags<Flags::enum_type> f2) Q_DECL_NOTHROW; \
 Q_DECLARE_FRIEND_INCOMPATIBLE_FLAGS(Flags)
+
+#else // OS_MAC_OLD
+
+#define Q_DECLARE_FRIEND_INCOMPATIBLE_FLAGS(Flags) \
+friend Q_DECL_CONSTEXPR QIncompatibleFlag operator|(Flags::enum_type f1, int f2);
+
+#define Q_DECLARE_FRIEND_OPERATORS_FOR_FLAGS(Flags) \
+friend Q_DECL_CONSTEXPR QFlags<Flags::enum_type> operator|(Flags::enum_type f1, Flags::enum_type f2); \
+friend Q_DECL_CONSTEXPR QFlags<Flags::enum_type> operator|(Flags::enum_type f1, QFlags<Flags::enum_type> f2); \
+Q_DECLARE_FRIEND_INCOMPATIBLE_FLAGS(Flags)
+
+#endif // OS_MAC_OLD
 
 // using for_const instead of plain range-based for loop to ensure usage of const_iterator
 // it is important for the copy-on-write Qt containers
@@ -219,7 +226,11 @@ public:
 	}
 	constexpr char operator[](std::size_t n) const {
 		return (n < _size) ? _str[n] :
+#ifndef OS_MAC_OLD
 			throw std::out_of_range("");
+#else // OS_MAC_OLD
+			throw std::exception();
+#endif // OS_MAC_OLD
 	}
 	constexpr std::size_t size() const { return _size; }
 	const char *c_str() const { return _str; }
@@ -257,6 +268,11 @@ typedef double float64;
 
 using std::string;
 using std::exception;
+#ifdef OS_MAC_OLD
+namespace std {
+using nullptr_t = decltype(nullptr);
+}
+#endif // OS_MAC_OLD
 
 // we copy some parts of C++11/14/17 std:: library, because on OS X 10.6+
 // version we can use C++11/14/17, but we can not use its library :(
@@ -322,6 +338,56 @@ template <typename T>
 inline constexpr typename remove_reference<T>::type &&move(T &&value) noexcept {
 	return static_cast<typename remove_reference<T>::type&&>(value);
 }
+
+template <typename T>
+void swap(T &a, T &b) {
+	T tmp = move(a);
+	a = move(b);
+	b = move(tmp);
+}
+
+template <typename T>
+struct remove_const {
+	using type = T;
+};
+
+template <typename T>
+struct remove_const<const T> {
+	using type = T;
+};
+
+template <typename T>
+struct remove_volatile {
+	using type = T;
+};
+
+template <typename T>
+struct remove_volatile<volatile T> {
+	using type = T;
+};
+
+template <typename T>
+using decay_simple_t = typename remove_const<typename remove_volatile<typename remove_reference<T>::type>::type>::type;
+
+template <typename T1, typename T2>
+struct is_same : false_type {
+};
+
+template <typename T>
+struct is_same<T, T> : true_type {
+};
+
+template <bool,	typename T = void>
+struct enable_if {
+};
+
+template <typename T>
+struct enable_if<true, T> {
+	using type = T;
+};
+
+template <bool Test, typename T = void>
+using enable_if_t = typename enable_if<Test, T>::type;
 
 template <typename T>
 struct add_const {
@@ -447,6 +513,13 @@ struct is_base_of {
 };
 
 } // namespace std_
+
+template <typename T>
+T createAndSwap(T &value) {
+	T result = T();
+	std_::swap(result, value);
+	return std_::move(result);
+}
 
 #include "logs.h"
 
@@ -704,11 +777,9 @@ enum DBIDefaultAttach {
 	dbidaPhoto = 1,
 };
 
-struct ConnectionProxy {
-	ConnectionProxy() : port(0) {
-	}
+struct ProxyData {
 	QString host;
-	uint32 port;
+	uint32 port = 0;
 	QString user, password;
 };
 
@@ -842,7 +913,8 @@ enum ShowLayerOption {
 	AnimatedShowLayer         = 0x00,
 	ForceFastShowLayer        = 0x04,
 };
-typedef QFlags<ShowLayerOption> ShowLayerOptions;
+Q_DECLARE_FLAGS(ShowLayerOptions, ShowLayerOption);
+Q_DECLARE_OPERATORS_FOR_FLAGS(ShowLayerOptions);
 
 static int32 FullArcLength = 360 * 16;
 static int32 QuarterArcLength = (FullArcLength / 4);
@@ -873,7 +945,7 @@ public:
 	template <typename... Args>
 	void makeIfNull(Args&&... args) {
 		if (isNull()) {
-			reset(new T(std::forward<Args>(args)...));
+			reset(new T(std_::forward<Args>(args)...));
 		}
 	};
 

@@ -66,11 +66,11 @@ private:
 
 bool checkReadyUpdate();
 
-#else
+#else // TDESKTOP_DISABLE_AUTOUPDATE
 class UpdateChecker : public QObject {
 	Q_OBJECT
 };
 
-#endif
+#endif // TDESKTOP_DISABLE_AUTOUPDATE
 
 QString countBetaVersionSignature(uint64 version);

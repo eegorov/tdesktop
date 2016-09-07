@@ -292,6 +292,7 @@ void PhotoSendBox::resizeEvent(QResizeEvent *e) {
 	_caption.resize(st::boxWideWidth - st::boxPhotoPadding.left() - st::boxPhotoPadding.right(), _caption.height());
 	_caption.moveToLeft(st::boxPhotoPadding.left(), _send.y() - st::boxButtonPadding.top() - _caption.height());
 	_compressed.moveToLeft(st::boxPhotoPadding.left(), st::boxPhotoPadding.top() + _thumbh + st::boxPhotoPadding.bottom() + st::boxPhotoCompressedPadding.top());
+	AbstractBox::resizeEvent(e);
 }
 
 void PhotoSendBox::closePressed() {
@@ -302,13 +303,6 @@ void PhotoSendBox::closePressed() {
 			App::main()->onShareContactCancel();
 		}
 	}
-}
-
-void PhotoSendBox::hideAll() {
-	_send.hide();
-	_cancel.hide();
-	_caption.hide();
-	_compressed.hide();
 }
 
 void PhotoSendBox::showAll() {
@@ -325,8 +319,12 @@ void PhotoSendBox::showAll() {
 	}
 }
 
-void PhotoSendBox::showDone() {
-	setInnerFocus();
+void PhotoSendBox::doSetInnerFocus() {
+	if (_caption.isHidden()) {
+		setFocus();
+	} else {
+		_caption.setFocus();
+	}
 }
 
 void PhotoSendBox::onSend(bool ctrlShiftEnter) {
@@ -620,12 +618,7 @@ void EditCaptionBox::resizeEvent(QResizeEvent *e) {
 	_cancel.moveToRight(st::boxButtonPadding.right() + _save.width() + st::boxButtonPadding.left(), _save.y());
 	_field->resize(st::boxWideWidth - st::boxPhotoPadding.left() - st::boxPhotoPadding.right(), _field->height());
 	_field->moveToLeft(st::boxPhotoPadding.left(), _save.y() - st::boxButtonPadding.top() - st::normalFont->height - _field->height());
-}
-
-void EditCaptionBox::hideAll() {
-	_save.hide();
-	_cancel.hide();
-	_field->hide();
+	AbstractBox::resizeEvent(e);
 }
 
 void EditCaptionBox::showAll() {
@@ -634,8 +627,8 @@ void EditCaptionBox::showAll() {
 	_field->show();
 }
 
-void EditCaptionBox::showDone() {
-	setInnerFocus();
+void EditCaptionBox::doSetInnerFocus() {
+	_field->setFocus();
 }
 
 void EditCaptionBox::onSave(bool ctrlShiftEnter) {

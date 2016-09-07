@@ -55,21 +55,32 @@ ConfirmBox::ConfirmBox(const QString &text, const QString &doneText, const style
 void ConfirmBox::init(const QString &text) {
 	_text.setText(st::boxTextFont, text, _informative ? _confirmBoxTextOptions : _textPlainOptions);
 
+	connect(&_confirm, SIGNAL(clicked()), this, SLOT(onConfirmPressed()));
+	connect(&_cancel, SIGNAL(clicked()), this, SLOT(onCancel()));
+	if (_informative) {
+		_cancel.hide();
+		connect(this, SIGNAL(confirmed()), this, SLOT(onCancel()));
+	}
+	onTextUpdated();
+
+	prepare();
+}
+
+void ConfirmBox::onConfirmPressed() {
+	if (_confirmedCallback) {
+		_confirmedCallback();
+	}
+	emit confirmed();
+}
+
+void ConfirmBox::onTextUpdated() {
 	textstyleSet(&st::boxTextStyle);
 	_textWidth = st::boxWidth - st::boxPadding.left() - st::boxButtonPadding.right();
 	_textHeight = qMin(_text.countHeight(_textWidth), 16 * int(st::boxTextStyle.lineHeight));
 	setMaxHeight(st::boxPadding.top() + _textHeight + st::boxPadding.bottom() + st::boxButtonPadding.top() + _confirm.height() + st::boxButtonPadding.bottom());
 	textstyleRestore();
 
-	connect(&_confirm, SIGNAL(clicked()), this, SIGNAL(confirmed()));
-	connect(&_cancel, SIGNAL(clicked()), this, SLOT(onCancel()));
-	if (_informative) {
-		_cancel.hide();
-		connect(this, SIGNAL(confirmed()), this, SLOT(onCancel()));
-	}
 	setMouseTracking(_text.hasLinks());
-
-	prepare();
 }
 
 void ConfirmBox::onCancel() {
@@ -86,7 +97,7 @@ void ConfirmBox::mousePressEvent(QMouseEvent *e) {
 	_lastMousePos = e->globalPos();
 	updateHover();
 	ClickHandler::pressed();
-	return LayeredWidget::mousePressEvent(e);
+	return LayerWidget::mousePressEvent(e);
 }
 
 void ConfirmBox::mouseReleaseEvent(QMouseEvent *e) {
@@ -130,11 +141,6 @@ void ConfirmBox::closePressed() {
 	emit cancelled();
 }
 
-void ConfirmBox::hideAll() {
-	_confirm.hide();
-	_cancel.hide();
-}
-
 void ConfirmBox::showAll() {
 	if (_informative) {
 		_confirm.show();
@@ -146,7 +152,7 @@ void ConfirmBox::showAll() {
 
 void ConfirmBox::keyPressEvent(QKeyEvent *e) {
 	if (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return) {
-		emit confirmed();
+		onConfirmPressed();
 	} else {
 		AbstractBox::keyPressEvent(e);
 	}
@@ -166,6 +172,7 @@ void ConfirmBox::paintEvent(QPaintEvent *e) {
 void ConfirmBox::resizeEvent(QResizeEvent *e) {
 	_confirm.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _confirm.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _confirm.width() + st::boxButtonPadding.left(), _confirm.y());
+	AbstractBox::resizeEvent(e);
 }
 
 SharePhoneConfirmBox::SharePhoneConfirmBox(PeerData *recipient)
@@ -246,10 +253,6 @@ void MaxInviteBox::step_good(float64 ms, bool timer) {
 	if (timer) update();
 }
 
-void MaxInviteBox::hideAll() {
-	_close.hide();
-}
-
 void MaxInviteBox::showAll() {
 	_close.show();
 }
@@ -279,6 +282,7 @@ void MaxInviteBox::paintEvent(QPaintEvent *e) {
 void MaxInviteBox::resizeEvent(QResizeEvent *e) {
 	_close.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _close.height());
 	_invitationLink = myrtlrect(st::boxPadding.left(), st::boxPadding.top() + _textHeight + st::boxTextFont->height, width() - st::boxPadding.left() - st::boxPadding.right(), 2 * st::boxTextFont->height);
+	AbstractBox::resizeEvent(e);
 }
 
 ConvertToSupergroupBox::ConvertToSupergroupBox(ChatData *chat) : AbstractBox(st::boxWideWidth)
@@ -342,11 +346,6 @@ bool ConvertToSupergroupBox::convertFail(const RPCError &error) {
 	return true;
 }
 
-void ConvertToSupergroupBox::hideAll() {
-	_convert.hide();
-	_cancel.hide();
-}
-
 void ConvertToSupergroupBox::showAll() {
 	_convert.show();
 	_cancel.show();
@@ -377,6 +376,7 @@ void ConvertToSupergroupBox::paintEvent(QPaintEvent *e) {
 void ConvertToSupergroupBox::resizeEvent(QResizeEvent *e) {
 	_convert.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _convert.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _convert.width() + st::boxButtonPadding.left(), _convert.y());
+	AbstractBox::resizeEvent(e);
 }
 
 PinMessageBox::PinMessageBox(ChannelData *channel, MsgId msgId) : AbstractBox(st::boxWidth)
@@ -398,6 +398,7 @@ void PinMessageBox::resizeEvent(QResizeEvent *e) {
 	_notify.moveToLeft(st::boxPadding.left(), _text.y() + _text.height() + st::boxMediumSkip);
 	_pin.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _pin.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _pin.width() + st::boxButtonPadding.left(), _pin.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void PinMessageBox::onPin() {
@@ -415,13 +416,6 @@ void PinMessageBox::showAll() {
 	_notify.show();
 	_pin.show();
 	_cancel.show();
-}
-
-void PinMessageBox::hideAll() {
-	_text.hide();
-	_notify.hide();
-	_pin.hide();
-	_cancel.hide();
 }
 
 void PinMessageBox::pinDone(const MTPUpdates &updates) {
@@ -463,6 +457,7 @@ void RichDeleteMessageBox::resizeEvent(QResizeEvent *e) {
 	_deleteAll.moveToLeft(st::boxPadding.left(), _reportSpam.y() + _reportSpam.height() + st::boxLittleSkip);
 	_delete.moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _delete.height());
 	_cancel.moveToRight(st::boxButtonPadding.right() + _delete.width() + st::boxButtonPadding.left(), _delete.y());
+	AbstractBox::resizeEvent(e);
 }
 
 void RichDeleteMessageBox::onDelete() {
@@ -495,15 +490,6 @@ void RichDeleteMessageBox::showAll() {
 	_deleteAll.show();
 	_delete.show();
 	_cancel.show();
-}
-
-void RichDeleteMessageBox::hideAll() {
-	_text.hide();
-	_banUser.hide();
-	_reportSpam.hide();
-	_deleteAll.hide();
-	_delete.hide();
-	_cancel.hide();
 }
 
 KickMemberBox::KickMemberBox(PeerData *chat, UserData *member)
@@ -581,6 +567,7 @@ void ConfirmInviteBox::resizeEvent(QResizeEvent *e) {
 	_status->move((width() - _status->width()) / 2, st::confirmInviteStatusTop);
 	_join->moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _join->height());
 	_cancel->moveToRight(st::boxButtonPadding.right() + _join->width() + st::boxButtonPadding.left(), _join->y());
+	AbstractBox::resizeEvent(e);
 }
 
 void ConfirmInviteBox::paintEvent(QPaintEvent *e) {
@@ -599,8 +586,4 @@ void ConfirmInviteBox::paintEvent(QPaintEvent *e) {
 
 void ConfirmInviteBox::showAll() {
 	showChildren();
-}
-
-void ConfirmInviteBox::hideAll() {
-	hideChildren();
 }

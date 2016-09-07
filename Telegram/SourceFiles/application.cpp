@@ -33,6 +33,8 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "autoupdater.h"
 #include "core/observer.h"
 #include "observer_peer.h"
+#include "core/observer.h"
+#include "window/chat_background.h"
 
 namespace {
 	void mtpStateChanged(int32 dc, int32 state) {
@@ -92,7 +94,12 @@ Application::Application(int &argc, char **argv) : QApplication(argc, argv) {
 	QByteArray d(QFile::encodeName(QDir(cWorkingDir()).absolutePath()));
 	char h[33] = { 0 };
 	hashMd5Hex(d.constData(), d.size(), h);
+#ifndef OS_MAC_STORE
 	_localServerName = psServerPrefix() + h + '-' + cGUIDStr();
+#else // OS_MAC_STORE
+	h[4] = 0; // use only first 4 chars
+	_localServerName = psServerPrefix() + h;
+#endif // OS_MAC_STORE
 
 	connect(&_localSocket, SIGNAL(connected()), this, SLOT(socketConnected()));
 	connect(&_localSocket, SIGNAL(disconnected()), this, SLOT(socketDisconnected()));
@@ -337,7 +344,9 @@ void Application::closeApplication() {
 	_updateReply = 0;
 	if (_updateChecker) _updateChecker->deleteLater();
 	_updateChecker = 0;
-	if (_updateThread) _updateThread->quit();
+	if (_updateThread) {
+		_updateThread->quit();
+	}
 	_updateThread = 0;
 #endif
 
@@ -736,7 +745,8 @@ AppClass::AppClass() : QObject()
 
 	Local::ReadMapState state = Local::readMap(QByteArray());
 	if (state == Local::ReadMapPassNeeded) {
-		cSetHasPasscode(true);
+		Global::SetLocalPasscode(true);
+		Global::RefLocalPasscodeChanged().notify();
 		DEBUG_LOG(("Application Info: passcode needed..."));
 	} else {
 		DEBUG_LOG(("Application Info: local map read..."));
@@ -922,6 +932,10 @@ void AppClass::call_handleDelayedPeerUpdates() {
 	Notify::peerUpdatedSendDelayed();
 }
 
+void AppClass::call_handleObservables() {
+	base::HandleObservables();
+}
+
 void AppClass::killDownloadSessions() {
 	uint64 ms = getms(), left = MTPAckSendWaiting + MTPKillFileSessionTimeout;
 	for (QMap<int32, uint64>::iterator i = killDownloadSessionTimes.begin(); i != killDownloadSessionTimes.end(); ) {
@@ -1051,8 +1065,8 @@ void AppClass::checkMapVersion() {
     if (Local::oldMapVersion() < AppVersion) {
 		if (Local::oldMapVersion()) {
 			QString versionFeatures;
-			if ((cAlphaVersion() || cBetaVersion()) && Local::oldMapVersion() < 9058) {
-				versionFeatures = QString::fromUtf8("\xe2\x80\x94 Alpha version of an embedded video player");
+			if ((cAlphaVersion() || cBetaVersion()) && Local::oldMapVersion() < 10003) {
+				versionFeatures = QString::fromUtf8("\xe2\x80\x94 New cute design for the Settings page");
 			} else if (Local::oldMapVersion() < 10000) {
 				versionFeatures = langNewVersionText();
 			} else {
@@ -1085,11 +1099,7 @@ AppClass::~AppClass() {
 	deleteAndMark(_uploader);
 	deleteAndMark(_translator);
 
-	delete cChatBackground();
-	cSetChatBackground(0);
-
-	delete cChatDogImage();
-	cSetChatDogImage(0);
+	Window::chatBackground()->reset();
 
 	style::stopManager();
 

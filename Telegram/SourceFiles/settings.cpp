@@ -47,11 +47,6 @@ QString gLangErrors;
 
 QString gDialogLastPath, gDialogHelperPath; // optimize QFileDialog
 
-bool gSoundNotify = true;
-bool gIncludeMuted = true;
-bool gDesktopNotify = true;
-DBINotifyView gNotifyView = dbinvShowPreview;
-bool gWindowsNotifications = true;
 bool gStartMinimized = false;
 bool gStartInTray = false;
 bool gAutoStart = false;
@@ -61,13 +56,6 @@ TWindowPos gWindowPos;
 LaunchMode gLaunchMode = LaunchModeNormal;
 bool gSupportTray = true;
 DBIWorkMode gWorkMode = dbiwmWindowAndTray;
-DBIConnectionType gConnectionType = dbictAuto;
-ConnectionProxy gConnectionProxy;
-#ifdef Q_OS_WIN
-bool gTryIPv6 = false;
-#else
-bool gTryIPv6 = true;
-#endif
 bool gSeenTrayTooltip = false;
 bool gRestartingUpdate = false, gRestarting = false, gRestartingToSettings = false, gWriteProtected = false;
 int32 gLastUpdateCheck = 0;
@@ -75,16 +63,8 @@ bool gNoStartUpdate = false;
 bool gStartToSettings = false;
 DBIDefaultAttach gDefaultAttach = dbidaDocument;
 bool gReplaceEmojis = true;
-bool gAskDownloadPath = false;
-QString gDownloadPath;
-QByteArray gDownloadPathBookmark;
 
 bool gCtrlEnter = false;
-
-QPixmapPointer gChatBackground = 0;
-int32 gChatBackgroundId = 0;
-QPixmapPointer gChatDogImage = 0;
-bool gTileBackground = false;
 
 uint32 gConnectionsInSession = 1;
 QString gLoggedPhoneNumber;
@@ -94,9 +74,6 @@ DBIScale gRealScale = dbisAuto, gScreenScale = dbisOne, gConfigScale = dbisAuto;
 bool gCompressPastedImage = true;
 
 QString gTimeFormat = qsl("hh:mm");
-
-int32 gAutoLock = 3600;
-bool gHasPasscode = false;
 
 bool gHasAudioPlayer = true;
 bool gHasAudioCapture = true;
@@ -126,7 +103,6 @@ QString gLangFile;
 bool gRetina = false;
 float64 gRetinaFactor = 1.;
 int32 gIntRetinaFactor = 1;
-bool gCustomNotifies = true;
 
 #ifdef Q_OS_WIN
 DBIPlatform gPlatform = dbipWindows;
@@ -160,12 +136,14 @@ bool gAutoPlayGif = true;
 
 void settingsParseArgs(int argc, char *argv[]) {
 #ifdef Q_OS_MAC
+#ifndef OS_MAC_OLD
 	if (QSysInfo::macVersion() >= QSysInfo::MV_10_11) {
 		gIsElCapitan = true;
-	} else if (QSysInfo::macVersion() < QSysInfo::MV_10_8) {
-		gPlatform = dbipMacOld;
 	}
-#endif
+#else // OS_MAC_OLD
+	gPlatform = dbipMacOld;
+#endif // OS_MAC_OLD
+#endif // Q_OS_MAC
 
 	switch (cPlatform()) {
 	case dbipWindows:
@@ -174,8 +152,11 @@ void settingsParseArgs(int argc, char *argv[]) {
 	break;
 	case dbipMac:
 		gUpdateURL = QUrl(qsl("http://tdesktop.com/mac/tupdates/current"));
+#ifndef OS_MAC_STORE
 		gPlatformString = qsl("MacOS");
-		gCustomNotifies = false;
+#else // OS_MAC_STORE
+		gPlatformString = qsl("MacAppStore");
+#endif // OS_MAC_STORE
 	break;
 	case dbipMacOld:
 		gUpdateURL = QUrl(qsl("http://tdesktop.com/mac32/tupdates/current"));

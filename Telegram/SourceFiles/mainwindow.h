@@ -30,12 +30,14 @@ class TitleWidget;
 class PasscodeWidget;
 class IntroWidget;
 class MainWidget;
-class SettingsWidget;
-class BackgroundWidget;
-class LayeredWidget;
+class LayerStackWidget;
+class LayerWidget;
 namespace Local {
-	class ClearManager;
-}
+class ClearManager;
+} // namespace Local
+namespace Settings {
+class Widget;
+} // namespace Settings
 
 class ConnectingWidget : public QWidget {
 	Q_OBJECT
@@ -124,7 +126,7 @@ typedef QList<NotifyWindow*> NotifyWindows;
 
 class MediaPreviewWidget;
 
-class MainWindow : public Platform::MainWindow {
+class MainWindow : public Platform::MainWindow, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -149,8 +151,6 @@ public:
 	void paintEvent(QPaintEvent *e);
 
 	void resizeEvent(QResizeEvent *e);
-	void updateAdaptiveLayout();
-	bool needBackButton();
 
 	void setupPasscode(bool anim);
 	void clearPasscode();
@@ -173,7 +173,6 @@ public:
 
 	IntroWidget *introWidget();
 	MainWidget *mainWidget();
-	SettingsWidget *settingsWidget();
 	PasscodeWidget *passcodeWidget();
 
 	void showConnecting(const QString &text, const QString &reconnect = QString());
@@ -190,10 +189,9 @@ public:
 	void activate();
 
 	void noIntro(IntroWidget *was);
-	void noSettings(SettingsWidget *was);
 	void noMain(MainWidget *was);
-	void noBox(BackgroundWidget *was);
-	void layerFinishedHide(BackgroundWidget *was);
+	void noLayerStack(LayerStackWidget *was);
+	void layerFinishedHide(LayerStackWidget *was);
 
 	void fixOrder();
 
@@ -240,7 +238,8 @@ public:
 		return contentOverlapped(QRect(w->mapToGlobal(r.boundingRect().topLeft()), r.boundingRect().size()));
 	}
 
-	void ui_showLayer(LayeredWidget *box, ShowLayerOptions options);
+	void ui_showLayer(LayerWidget *box, ShowLayerOptions options);
+	void ui_hideSettingsAndLayer(ShowLayerOptions options);
 	bool ui_isLayerShown();
 	bool ui_isMediaViewShown();
 	void ui_showMediaPreview(DocumentData *document);
@@ -256,7 +255,6 @@ public slots:
 	void checkAutoLock();
 
 	void showSettings();
-	void hideSettings(bool fast = false);
 	void layerHidden();
 	void setInnerFocus();
 	void updateTitleStatus();
@@ -298,6 +296,7 @@ signals:
 
 private slots:
 	void onStateChanged(Qt::WindowState state);
+	void onSettingsDestroyed(QObject *was);
 
 private:
 
@@ -316,8 +315,8 @@ private:
 	PasscodeWidget *_passcode = nullptr;
 	IntroWidget *intro = nullptr;
 	MainWidget *main = nullptr;
-	SettingsWidget *settings = nullptr;
-	BackgroundWidget *layerBg = nullptr;
+	ChildWidget<Settings::Widget> settings = { nullptr };
+	ChildWidget<LayerStackWidget> layerBg = { nullptr };
 	std_::unique_ptr<MediaPreviewWidget> _mediaPreview;
 
 	QTimer _isActiveTimer;

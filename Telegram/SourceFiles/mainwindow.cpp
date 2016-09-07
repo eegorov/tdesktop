@@ -32,7 +32,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "intro/introwidget.h"
 #include "mainwidget.h"
 #include "layerwidget.h"
-#include "settingswidget.h"
 #include "boxes/confirmbox.h"
 #include "boxes/contactsbox.h"
 #include "boxes/addcontactbox.h"
@@ -41,6 +40,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "mediaview.h"
 #include "localstorage.h"
 #include "apiwrap.h"
+#include "settings/settings_widget.h"
 
 ConnectingWidget::ConnectingWidget(QWidget *parent, const QString &text, const QString &reconnect) : QWidget(parent), _shadow(st::boxShadow), _reconnect(this, QString()) {
 	set(text, reconnect);
@@ -170,7 +170,7 @@ void NotifyWindow::updateNotifyDisplay() {
 		p.fillRect(st::notifyBorderWidth, h - st::notifyBorderWidth, w - st::notifyBorderWidth, st::notifyBorderWidth, st::notifyBorder->b);
 		p.fillRect(0, st::notifyBorderWidth, st::notifyBorderWidth, h - st::notifyBorderWidth, st::notifyBorder->b);
 
-		if (!App::passcoded() && cNotifyView() <= dbinvShowName) {
+		if (!App::passcoded() && Global::NotifyView() <= dbinvShowName) {
 			history->peer->loadUserpic(true, true);
 			history->peer->paintUserpicLeft(p, st::notifyPhotoSize, st::notifyPhotoPos.x(), st::notifyPhotoPos.y(), width());
 		} else {
@@ -181,7 +181,7 @@ void NotifyWindow::updateNotifyDisplay() {
 		int32 itemWidth = w - st::notifyPhotoPos.x() - st::notifyPhotoSize - st::notifyTextLeft - st::notifyClosePos.x() - st::notifyClose.width;
 
 		QRect rectForName(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyTextTop, itemWidth, st::msgNameFont->height);
-		if (!App::passcoded() && cNotifyView() <= dbinvShowName) {
+		if (!App::passcoded() && Global::NotifyView() <= dbinvShowName) {
 			if (history->peer->isChat() || history->peer->isMegagroup()) {
 				p.drawSprite(QPoint(rectForName.left() + st::dialogsChatImgPos.x(), rectForName.top() + st::dialogsChatImgPos.y()), st::dlgChatImg);
 				rectForName.setLeft(rectForName.left() + st::dialogsImgSkip);
@@ -200,7 +200,7 @@ void NotifyWindow::updateNotifyDisplay() {
 		p.setPen(st::dialogsDateFg);
 		p.drawText(rectForName.left() + rectForName.width() + st::dialogsDateSkip, rectForName.top() + st::dialogsTextFont->ascent, dt);
 
-		if (!App::passcoded() && cNotifyView() <= dbinvShowPreview) {
+		if (!App::passcoded() && Global::NotifyView() <= dbinvShowPreview) {
 			const HistoryItem *textCachedFor = 0;
 			Text itemTextCache(itemWidth);
 			QRect r(st::notifyPhotoPos.x() + st::notifyPhotoSize + st::notifyTextLeft, st::notifyItemTop + st::msgNameFont->height, itemWidth, 2 * st::dialogsTextFont->height);
@@ -225,7 +225,7 @@ void NotifyWindow::updateNotifyDisplay() {
 		}
 
 		p.setPen(st::dialogsNameFg);
-		if (!App::passcoded() && cNotifyView() <= dbinvShowName) {
+		if (!App::passcoded() && Global::NotifyView() <= dbinvShowName) {
 			history->peer->dialogName().drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 		} else {
 			p.setFont(st::msgNameFont->f);
@@ -299,7 +299,6 @@ void NotifyWindow::mousePressEvent(QMouseEvent *e) {
 			App::wnd()->setInnerFocus();
 			App::wnd()->notifyClear();
 		} else {
-			App::wnd()->hideSettings();
 			Ui::showPeerHistory(peer, msgId);
 		}
 		e->ignore();
@@ -372,6 +371,19 @@ MainWindow::MainWindow() {
 	iconbig32 = iconbig256.scaledToWidth(32, Qt::SmoothTransformation);
 	iconbig64 = iconbig256.scaledToWidth(64, Qt::SmoothTransformation);
 
+	subscribe(Global::RefNotifySettingsChanged(), [this](const Notify::ChangeType &type) {
+		if (type == Notify::ChangeType::DesktopEnabled) {
+			updateTrayMenu();
+			notifyClear();
+		} else if (type == Notify::ChangeType::ViewParams) {
+			notifyUpdateAll();
+		} else if (type == Notify::ChangeType::UseNative) {
+			notifyClearFast();
+		} else if (type == Notify::ChangeType::IncludeMuted) {
+			Notify::unreadCounterUpdated();
+		}
+	});
+
 	if (objectName().isEmpty()) {
 		setObjectName(qsl("MainWindow"));
 	}
@@ -395,6 +407,8 @@ MainWindow::MainWindow() {
 	connect(&_autoLockTimer, SIGNAL(timeout()), this, SLOT(checkAutoLock()));
 
 	connect(this, SIGNAL(imageLoaded()), this, SLOT(notifyUpdateAllPhotos()));
+
+	subscribe(Global::RefSelfChanged(), [this]() { updateGlobalMenu(); });
 
 	setAttribute(Qt::WA_NoSystemBackground);
 	setAttribute(Qt::WA_OpaquePaintEvent);
@@ -455,7 +469,7 @@ void MainWindow::firstShow() {
 #else
 	trayIconMenu = new QMenu(this);
 #endif
-	auto notificationItem = lang(cDesktopNotify()
+	auto notificationItem = lang(Global::DesktopNotify()
 		? lng_disable_notifications_from_tray : lng_enable_notifications_from_tray);
 
 	if (cPlatform() == dbipWindows || cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
@@ -485,13 +499,6 @@ void MainWindow::clearWidgets() {
 		_passcode->hide();
 		_passcode->deleteLater();
 		_passcode = 0;
-	}
-	if (settings) {
-		settings->stop_show();
-		settings->hide();
-		settings->deleteLater();
-		settings->rpcClear();
-		settings = 0;
 	}
 	if (main) {
 		delete main;
@@ -537,8 +544,6 @@ void MainWindow::clearPasscode() {
 	_passcode = 0;
 	if (intro) {
 		intro->animShow(bg, true);
-	} else if (settings) {
-		settings->animShow(bg, true);
 	} else {
 		main->animShow(bg, true);
 	}
@@ -558,7 +563,9 @@ void MainWindow::setupPasscode(bool anim) {
 	_passcode = new PasscodeWidget(this);
 	_passcode->move(0, st::titleHeight);
 	if (main) main->hide();
-	if (settings) settings->hide();
+	if (settings) {
+		settings->deleteLater();
+	}
 	if (intro) intro->hide();
 	if (anim) {
 		_passcode->animShow(bg);
@@ -580,10 +587,10 @@ void MainWindow::checkAutoLockIn(int msec) {
 }
 
 void MainWindow::checkAutoLock() {
-	if (!cHasPasscode() || App::passcoded()) return;
+	if (!Global::LocalPasscode() || App::passcoded()) return;
 
 	App::app()->checkLocalTime();
-	uint64 ms = getms(true), idle = psIdleTime(), should = cAutoLock() * 1000ULL;
+	uint64 ms = getms(true), idle = psIdleTime(), should = Global::AutoLock() * 1000ULL;
 	if (idle >= should || (_shouldLockAt > 0 && ms > _shouldLockAt + 3000ULL)) {
 		setupPasscode(true);
 	} else {
@@ -600,6 +607,7 @@ void MainWindow::setupIntro(bool anim) {
 	if (_mediaView) {
 		_mediaView->clearData();
 	}
+	Ui::hideSettingsAndLayer(true);
 
 	QPixmap bg = anim ? grabInner() : QPixmap();
 
@@ -684,63 +692,29 @@ void MainWindow::showSettings() {
 
 	if (isHidden()) showFromTray();
 
-	Ui::hideLayer();
 	if (settings) {
-		return hideSettings();
+		Ui::hideSettingsAndLayer();
+		return;
 	}
-	QPixmap bg = grabInner();
 
-	if (intro) {
-		intro->stop_show();
-		intro->hide();
-	} else if (main) {
-		main->animStop_show();
-		main->hide();
+	if (!layerBg) {
+		layerBg = new LayerStackWidget(this);
 	}
-	settings = new SettingsWidget(this);
-	settings->animShow(bg);
-	title->updateBackButton();
-
-	fixOrder();
+	settings = new Settings::Widget();
+	connect(settings, SIGNAL(destroyed(QObject*)), this, SLOT(onSettingsDestroyed(QObject*)));
+	layerBg->showSpecialLayer(settings);
 }
 
-void MainWindow::hideSettings(bool fast) {
-	if (!settings || _passcode) return;
-
-	if (fast) {
-		settings->stop_show();
-		settings->hide();
-		settings->deleteLater();
-		settings->rpcClear();
-		settings = 0;
-		if (intro) {
-			intro->show();
-		} else {
-			main->show();
-		}
-	} else {
-		QPixmap bg = grabInner();
-
-		settings->stop_show();
-		settings->hide();
-		settings->deleteLater();
-		settings->rpcClear();
-		settings = 0;
-		if (intro) {
-			intro->animShow(bg, true);
-		} else {
-			main->animShow(bg, true);
-		}
+void MainWindow::ui_hideSettingsAndLayer(ShowLayerOptions options) {
+	if (layerBg) {
+		layerBg->onClose();
 	}
-	title->updateBackButton();
-
-	fixOrder();
 }
 
 void MainWindow::mtpStateChanged(int32 dc, int32 state) {
 	if (dc == MTP::maindc()) {
 		updateTitleStatus();
-		if (settings) settings->updateConnectionType();
+		Global::RefConnectionTypeChanged().notify();
 	}
 }
 
@@ -764,10 +738,6 @@ IntroWidget *MainWindow::introWidget() {
 
 MainWidget *MainWindow::mainWidget() {
 	return main;
-}
-
-SettingsWidget *MainWindow::settingsWidget() {
-	return settings;
 }
 
 PasscodeWidget *MainWindow::passcodeWidget() {
@@ -799,37 +769,34 @@ void MainWindow::showDocument(DocumentData *doc, HistoryItem *item) {
 	_mediaView->setFocus();
 }
 
-void MainWindow::ui_showLayer(LayeredWidget *box, ShowLayerOptions options) {
+void MainWindow::ui_showLayer(LayerWidget *box, ShowLayerOptions options) {
 	if (box) {
-		bool fast = (options.testFlag(ForceFastShowLayer)) || Ui::isLayerShown();
-		if (layerBg) {
-			if (options.testFlag(KeepOtherLayers)) {
-				if (options.testFlag(ShowAfterOtherLayers)) {
-					layerBg->showLayerLast(box);
-					return;
-				} else {
-					layerBg->replaceInner(box);
-					return;
-				}
-			} else {
-				layerBg->onClose();
-				layerBg->hide();
-				layerBg->deleteLater();
-				layerBg = 0;
-			}
+		if (!layerBg) {
+			layerBg = new LayerStackWidget(this);
 		}
-
-		layerBg = new BackgroundWidget(this, box);
-		if (fast) {
+		if (options.testFlag(KeepOtherLayers)) {
+			if (options.testFlag(ShowAfterOtherLayers)) {
+				layerBg->prependLayer(box);
+			} else {
+				layerBg->appendLayer(box);
+			}
+		} else {
+			layerBg->showLayer(box);
+		}
+		if (options.testFlag(ForceFastShowLayer)) {
 			layerBg->showFast();
 		}
 	} else {
 		if (layerBg) {
-			layerBg->onClose();
-			if (options.testFlag(ForceFastShowLayer)) {
-				layerBg->hide();
-				layerBg->deleteLater();
-				layerBg = 0;
+			if (settings) {
+				layerBg->onCloseLayers();
+			} else {
+				layerBg->onClose();
+				if (options.testFlag(ForceFastShowLayer)) {
+					layerBg->hide();
+					layerBg->deleteLater();
+					layerBg = nullptr;
+				}
 			}
 		}
 		hideMediaview();
@@ -922,7 +889,7 @@ void MainWindow::layerHidden() {
 		layerBg->hide();
 		layerBg->deleteLater();
 	}
-	layerBg = 0;
+	layerBg = nullptr;
 	hideMediaview();
 	setInnerFocus();
 }
@@ -1139,7 +1106,7 @@ void MainWindow::updateTrayMenu(bool force) {
     if (!trayIconMenu || (cPlatform() == dbipWindows && !force)) return;
 
     bool active = isActive(false);
-    QString notificationItem = lang(cDesktopNotify()
+    QString notificationItem = lang(Global::DesktopNotify()
         ? lng_disable_notifications_from_tray : lng_enable_notifications_from_tray);
 
     if (cPlatform() == dbipWindows || cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
@@ -1197,7 +1164,9 @@ void MainWindow::onLogoutSure() {
 
 void MainWindow::updateGlobalMenu() {
 #ifdef Q_OS_MAC
-	psMacUpdateMenu();
+	if (App::wnd()) {
+		psMacUpdateMenu();
+	}
 #endif
 }
 
@@ -1225,9 +1194,9 @@ void MainWindow::noIntro(IntroWidget *was) {
 	}
 }
 
-void MainWindow::noSettings(SettingsWidget *was) {
+void MainWindow::onSettingsDestroyed(QObject *was) {
 	if (was == settings) {
-		settings = 0;
+		settings = nullptr;
 	}
 	checkHistoryActivation();
 }
@@ -1238,13 +1207,13 @@ void MainWindow::noMain(MainWidget *was) {
 	}
 }
 
-void MainWindow::noBox(BackgroundWidget *was) {
+void MainWindow::noLayerStack(LayerStackWidget *was) {
 	if (was == layerBg) {
-		layerBg = 0;
+		layerBg = nullptr;
 	}
 }
 
-void MainWindow::layerFinishedHide(BackgroundWidget *was) {
+void MainWindow::layerFinishedHide(LayerStackWidget *was) {
 	if (was == layerBg) {
 		QTimer::singleShot(0, this, SLOT(layerHidden()));
 	}
@@ -1286,15 +1255,28 @@ void MainWindow::toggleDisplayNotifyFromTray() {
 		Ui::showLayer(new InformBox(lang(lng_passcode_need_unblock)));
 		return;
 	}
-	cSetDesktopNotify(!cDesktopNotify());
-	if (settings) {
-		settings->updateDisplayNotify();
-	} else {
-		if (!cDesktopNotify()) {
-			notifyClear();
+
+	bool soundNotifyChanged = false;
+	Global::SetDesktopNotify(!Global::DesktopNotify());
+	if (Global::DesktopNotify()) {
+		if (Global::RestoreSoundNotifyFromTray() && !Global::SoundNotify()) {
+			Global::SetSoundNotify(true);
+			Global::SetRestoreSoundNotifyFromTray(false);
+			soundNotifyChanged = true;
 		}
-		Local::writeUserSettings();
-		updateTrayMenu();
+	} else {
+		if (Global::SoundNotify()) {
+			Global::SetSoundNotify(false);
+			Global::SetRestoreSoundNotifyFromTray(true);
+			soundNotifyChanged = true;
+		} else {
+			Global::SetRestoreSoundNotifyFromTray(false);
+		}
+	}
+	Local::writeUserSettings();
+	Global::RefNotifySettingsChanged().notify(Notify::ChangeType::DesktopEnabled);
+	if (soundNotifyChanged) {
+		Global::RefNotifySettingsChanged().notify(Notify::ChangeType::SoundEnabled);
 	}
 }
 
@@ -1325,25 +1307,13 @@ void MainWindow::resizeEvent(QResizeEvent *e) {
 	}
 	if (layout != Global::AdaptiveLayout()) {
 		Global::SetAdaptiveLayout(layout);
-		updateAdaptiveLayout();
+		Adaptive::Changed().notify(true);
 	}
 	title->setGeometry(0, 0, width(), st::titleHeight);
 	if (layerBg) layerBg->resize(width(), height());
 	if (_mediaPreview) _mediaPreview->setGeometry(0, title->height(), width(), height() - title->height());
 	if (_connecting) _connecting->setGeometry(0, height() - _connecting->height(), _connecting->width(), _connecting->height());
 	emit resized(QSize(width(), height() - st::titleHeight));
-}
-
-void MainWindow::updateAdaptiveLayout() {
-	title->updateAdaptiveLayout();
-	if (main) main->updateAdaptiveLayout();
-	if (settings) settings->updateAdaptiveLayout();
-	if (intro) intro->updateAdaptiveLayout();
-	if (layerBg) layerBg->updateAdaptiveLayout();
-}
-
-bool MainWindow::needBackButton() {
-	return !!settings;
 }
 
 MainWindow::TempDirState MainWindow::tempDirState() {
@@ -1365,8 +1335,8 @@ void MainWindow::tempDirDelete(int task) {
 		if (_clearManager->addTask(task)) {
 			return;
 		} else {
-			_clearManager->deleteLater();
-			_clearManager = 0;
+			_clearManager->stop();
+			_clearManager = nullptr;
 		}
 	}
 	_clearManager = new Local::ClearManager();
@@ -1378,16 +1348,16 @@ void MainWindow::tempDirDelete(int task) {
 
 void MainWindow::onClearFinished(int task, void *manager) {
 	if (manager && manager == _clearManager) {
-		_clearManager->deleteLater();
-		_clearManager = 0;
+		_clearManager->stop();
+		_clearManager = nullptr;
 	}
 	emit tempDirCleared(task);
 }
 
 void MainWindow::onClearFailed(int task, void *manager) {
 	if (manager && manager == _clearManager) {
-		_clearManager->deleteLater();
-		_clearManager = 0;
+		_clearManager->stop();
+		_clearManager = nullptr;
 	}
 	emit tempDirClearFailed(task);
 }
@@ -1443,7 +1413,7 @@ void MainWindow::notifySchedule(History *history, HistoryItem *item) {
 
 	uint64 when = ms + delay;
 	notifyWhenAlerts[history].insert(when, notifyByFrom);
-	if (cDesktopNotify() && !psSkipDesktopNotify()) {
+	if (Global::DesktopNotify() && !psSkipDesktopNotify()) {
 		NotifyWhenMaps::iterator i = notifyWhenMaps.find(history);
 		if (i == notifyWhenMaps.end()) {
 			i = notifyWhenMaps.insert(history, NotifyWhenMap());
@@ -1589,14 +1559,14 @@ void MainWindow::notifyShowNext(NotifyWindow *remove) {
 		App::playSound();
 	}
 
-    if (cCustomNotifies()) {
+    if (Global::CustomNotifies()) {
         for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
             int32 ind = (*i)->index();
             if (ind < 0) continue;
             --count;
         }
     }
-	if (count <= 0 || notifyWaiters.isEmpty() || !cDesktopNotify() || psSkipDesktopNotify()) {
+	if (count <= 0 || notifyWaiters.isEmpty() || !Global::DesktopNotify() || psSkipDesktopNotify()) {
 		if (nextAlert) {
 			notifyWaitTimer.start(nextAlert - ms);
 		}
@@ -1692,7 +1662,7 @@ void MainWindow::notifyShowNext(NotifyWindow *remove) {
 					} while (nextNotify);
 				}
 
-				if (cCustomNotifies()) {
+				if (Global::CustomNotifies()) {
 					NotifyWindow *notify = new NotifyWindow(notifyItem, x, y, fwdCount);
 					notifyWindows.push_back(notify);
 					psNotifyShown(notify);
@@ -1725,7 +1695,7 @@ void MainWindow::notifyShowNext(NotifyWindow *remove) {
 }
 
 void MainWindow::notifyItemRemoved(HistoryItem *item) {
-	if (cCustomNotifies()) {
+	if (Global::CustomNotifies()) {
 		for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
 			(*i)->itemRemoved(item);
 		}
@@ -1733,7 +1703,7 @@ void MainWindow::notifyItemRemoved(HistoryItem *item) {
 }
 
 void MainWindow::notifyStopHiding() {
-    if (cCustomNotifies()) {
+    if (Global::CustomNotifies()) {
         for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
             (*i)->stopHiding();
         }
@@ -1741,7 +1711,7 @@ void MainWindow::notifyStopHiding() {
 }
 
 void MainWindow::notifyStartHiding() {
-    if (cCustomNotifies()) {
+    if (Global::CustomNotifies()) {
         for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
             (*i)->startHiding();
         }
@@ -1749,7 +1719,7 @@ void MainWindow::notifyStartHiding() {
 }
 
 void MainWindow::notifyUpdateAllPhotos() {
-    if (cCustomNotifies()) {
+    if (Global::CustomNotifies()) {
         for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
             (*i)->updatePeerPhoto();
         }
@@ -1762,7 +1732,7 @@ void MainWindow::app_activateClickHandler(ClickHandlerPtr handler, Qt::MouseButt
 }
 
 void MainWindow::notifyUpdateAll() {
-	if (cCustomNotifies()) {
+	if (Global::CustomNotifies()) {
 		for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
 			(*i)->updateNotifyDisplay();
 		}
@@ -1771,7 +1741,7 @@ void MainWindow::notifyUpdateAll() {
 }
 
 void MainWindow::notifyActivateAll() {
-	if (cCustomNotifies()) {
+	if (Global::CustomNotifies()) {
         for (NotifyWindows::const_iterator i = notifyWindows.cbegin(), e = notifyWindows.cend(); i != e; ++i) {
             psActivateNotify(*i);
         }
@@ -1890,13 +1860,9 @@ QImage MainWindow::iconWithCounter(int size, int count, style::color bg, bool sm
 void MainWindow::sendPaths() {
 	if (App::passcoded()) return;
 	hideMediaview();
-	if (settings) {
-		hideSettings();
-	} else {
-		Ui::hideLayer();
-		if (main) {
-			main->activate();
-		}
+	Ui::hideSettingsAndLayer();
+	if (main) {
+		main->activate();
 	}
 }
 
@@ -1937,7 +1903,10 @@ void MainWindow::updateIsActive(int timeout) {
 
 MainWindow::~MainWindow() {
     notifyClearFast();
-	delete _clearManager;
+	if (_clearManager) {
+		_clearManager->stop();
+		_clearManager = nullptr;
+	}
 	delete _connecting;
 	delete _mediaView;
 	delete trayIcon;
@@ -2798,7 +2767,7 @@ void LastCrashedWindow::updateControls() {
 }
 
 void LastCrashedWindow::onNetworkSettings() {
-	const ConnectionProxy &p(Sandbox::PreLaunchProxy());
+	auto &p = Sandbox::PreLaunchProxy();
 	NetworkSettingsWindow *box = new NetworkSettingsWindow(this, p.host, p.port ? p.port : 80, p.user, p.password);
 	connect(box, SIGNAL(saved(QString, quint32, QString, QString)), this, SLOT(onNetworkSettingsSaved(QString, quint32, QString, QString)));
 	box->show();

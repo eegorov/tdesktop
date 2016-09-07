@@ -689,14 +689,22 @@ void checkForSwitchInlineButton(HistoryItem *item) {
 } // namespace
 
 HistoryItem *Histories::addNewMessage(const MTPMessage &msg, NewMessageType type) {
-	PeerId peer = peerFromMessage(msg);
+	auto peer = peerFromMessage(msg);
 	if (!peer) return nullptr;
 
-	HistoryItem *result = App::history(peer)->addNewMessage(msg, type);
+	auto result = App::history(peer)->addNewMessage(msg, type);
 	if (result && type == NewMessageUnread) {
 		checkForSwitchInlineButton(result);
 	}
 	return result;
+}
+
+int Histories::unreadBadge() const {
+	return _unreadFull - (Global::IncludeMuted() ? 0 : _unreadMuted);
+}
+
+bool Histories::unreadOnlyMuted() const {
+	return Global::IncludeMuted() ? (_unreadMuted >= _unreadFull) : false;
 }
 
 HistoryItem *History::createItem(const MTPMessage &msg, bool applyServiceAction, bool detachExistingItem) {
@@ -1492,7 +1500,7 @@ void History::setUnreadCount(int newUnreadCount) {
 		}
 		if (inChatList(Dialogs::Mode::All)) {
 			App::histories().unreadIncrement(newUnreadCount - _unreadCount, mute());
-			if (!mute() || cIncludeMuted()) {
+			if (!mute() || Global::IncludeMuted()) {
 				Notify::unreadCounterUpdated();
 			}
 		}
@@ -2561,9 +2569,14 @@ void HistoryMessageReplyMarkup::createFromButtonRows(const QVector<MTPKeyboardBu
 						buttonRow.push_back({ Button::Url, qs(buttonData.vtext), qba(buttonData.vurl), 0 });
 					} break;
 					case mtpc_keyboardButtonSwitchInline: {
-						const auto &buttonData(button.c_keyboardButtonSwitchInline());
-						buttonRow.push_back({ Button::SwitchInline, qs(buttonData.vtext), qba(buttonData.vquery), 0 });
-						flags |= MTPDreplyKeyboardMarkup_ClientFlag::f_has_switch_inline_button;
+						auto &buttonData = button.c_keyboardButtonSwitchInline();
+						auto buttonType = buttonData.is_same_peer() ? Button::SwitchInlineSame : Button::SwitchInline;
+						buttonRow.push_back({ buttonType, qs(buttonData.vtext), qba(buttonData.vquery), 0 });
+						if (buttonType == Button::SwitchInline) {
+							// Optimization flag.
+							// Fast check on all new messages if there is a switch button to auto-click it.
+							flags |= MTPDreplyKeyboardMarkup_ClientFlag::f_has_switch_inline_button;
+						}
 					} break;
 					}
 				}
@@ -6028,9 +6041,9 @@ void LocationManager::onFinished(QNetworkReply *reply) {
 			{
 				QBuffer buffer(&data);
 				QImageReader reader(&buffer);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
+#ifndef OS_MAC_OLD
 				reader.setAutoTransform(true);
-#endif
+#endif // OS_MAC_OLD
 				thumb = QPixmap::fromImageReader(&reader, Qt::ColorOnly);
 				format = reader.format();
 				thumb.setDevicePixelRatio(cRetinaFactor());
@@ -6602,6 +6615,7 @@ void HistoryMessage::KeyboardStyle::paintButtonIcon(Painter &p, const QRect &rec
 	case Button::Url: sprite = st::msgBotKbUrlIcon; break;
 //	case Button::RequestPhone: sprite = st::msgBotKbRequestPhoneIcon; break;
 //	case Button::RequestLocation: sprite = st::msgBotKbRequestLocationIcon; break;
+	case Button::SwitchInlineSame:
 	case Button::SwitchInline: sprite = st::msgBotKbSwitchPmIcon; break;
 	}
 	if (!sprite.isEmpty()) {
@@ -6621,6 +6635,7 @@ int HistoryMessage::KeyboardStyle::minButtonWidth(HistoryMessageReplyMarkup::But
 	case Button::Url: iconWidth = st::msgBotKbUrlIcon.pxWidth(); break;
 	//case Button::RequestPhone: iconWidth = st::msgBotKbRequestPhoneIcon.pxWidth(); break;
 	//case Button::RequestLocation: iconWidth = st::msgBotKbRequestLocationIcon.pxWidth(); break;
+	case Button::SwitchInlineSame:
 	case Button::SwitchInline: iconWidth = st::msgBotKbSwitchPmIcon.pxWidth(); break;
 	case Button::Callback: iconWidth = st::msgInvSendingImg.pxWidth(); break;
 	}
@@ -8362,7 +8377,7 @@ void GoToMessageClickHandler::onClickImpl() const {
 		if (current && current->history()->peer->id == peer()) {
 			App::main()->pushReplyReturn(current);
 		}
-		Ui::showPeerHistory(peer(), msgid());
+		Ui::showPeerHistory(peer(), msgid(), Ui::ShowWay::Forward);
 	}
 }
 

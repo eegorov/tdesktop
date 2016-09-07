@@ -69,12 +69,6 @@ void InnerWidget::createBlocks() {
 	}
 }
 
-void InnerWidget::resizeToWidth(int newWidth, int minHeight) {
-	int naturalHeight = resizeGetHeight(newWidth);
-	_addedHeight = qMax(minHeight - naturalHeight, 0);
-	resize(newWidth, naturalHeight + _addedHeight);
-}
-
 void InnerWidget::setVisibleTopBottom(int visibleTop, int visibleBottom) {
 	_visibleTop = visibleTop;
 	_visibleBottom = visibleBottom;
@@ -84,7 +78,7 @@ void InnerWidget::setVisibleTopBottom(int visibleTop, int visibleBottom) {
 		decreaseAdditionalHeight(notDisplayedAtBottom);
 	}
 
-	for_const (auto blockData, _blocks) {
+	for_const (auto &blockData, _blocks) {
 		int blockY = blockData.block->y();
 		blockData.block->setVisibleTopBottom(visibleTop - blockY, visibleBottom - blockY);
 	}
@@ -225,7 +219,10 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 	refreshBlocksPositions();
 
 	update();
-	return countHeight();
+	auto naturalHeight = countHeight();
+
+	_addedHeight = qMax(_minHeight - naturalHeight, 0);
+	return naturalHeight + _addedHeight;
 }
 
 int InnerWidget::countHeight() const {

@@ -24,6 +24,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include <vector>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QtMath>
 
 namespace codegen {
 namespace style {
@@ -75,7 +76,10 @@ inline bool operator!=(const Type &a, const Type &b) {
 namespace data {
 
 inline int pxAdjust(int value, int scale) {
-	return qRound((value * scale / 4.) + (value > 0 ? -0.01 : 0.01));
+	if (value < 0) {
+		return -pxAdjust(-value, scale);
+	}
+	return qFloor((value * scale / 4.) + 0.1);
 }
 
 struct point {

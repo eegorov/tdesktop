@@ -24,7 +24,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "backgroundbox.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "settingswidget.h"
+#include "window/chat_background.h"
 #include "styles/style_overview.h"
 
 BackgroundInner::BackgroundInner() :
@@ -130,7 +130,7 @@ void BackgroundInner::paintEvent(QPaintEvent *e) {
 				const QPixmap &pix(paper.thumb->pix(st::backgroundSize.width(), st::backgroundSize.height()));
 				p.drawPixmap(x, y, pix);
 
-				if (paper.id == cChatBackgroundId()) {
+				if (paper.id == Window::chatBackground()->id()) {
 					int checkPosX = x + st::backgroundSize.width() - st::overviewPhotoChecked.width();
 					int checkPosY = y + st::backgroundSize.height() - st::overviewPhotoChecked.height();
 					st::overviewPhotoChecked.paint(p, QPoint(checkPosX, checkPosY), width());
@@ -172,9 +172,6 @@ void BackgroundInner::mouseReleaseEvent(QMouseEvent *e) {
 	}
 }
 
-BackgroundInner::~BackgroundInner() {
-}
-
 void BackgroundInner::resizeEvent(QResizeEvent *e) {
 }
 
@@ -199,7 +196,9 @@ void BackgroundBox::onBackgroundChosen(int index) {
 	if (index >= 0 && index < App::cServerBackgrounds().size()) {
 		const App::WallPaper &paper(App::cServerBackgrounds().at(index));
 		if (App::main()) App::main()->setChatBackground(paper);
-		if (App::settings()) App::settings()->needBackgroundUpdate(!paper.id);
+
+		using Update = Window::ChatBackgroundUpdate;
+		Window::chatBackground()->notify(Update(Update::Type::Start, !paper.id));
 	}
-	emit closed();
+	onClose();
 }

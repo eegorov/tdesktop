@@ -20,7 +20,17 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-class LayeredWidget;
+class LayerWidget;
+namespace base {
+template <typename Type>
+class Observable;
+} // namespace base
+namespace InlineBots {
+namespace Layout {
+class ItemBase;
+} // namespace Layout
+} // namespace InlineBots
+
 
 namespace App {
 
@@ -42,22 +52,15 @@ void logOutDelayed();
 
 } // namespace App
 
-namespace InlineBots {
-namespace Layout {
-
-class ItemBase;
-
-} // namespace Layout
-} // namespace InlineBots
-
 namespace Ui {
 
 void showMediaPreview(DocumentData *document);
 void showMediaPreview(PhotoData *photo);
 void hideMediaPreview();
 
-void showLayer(LayeredWidget *box, ShowLayerOptions options = CloseOtherLayers);
+void showLayer(LayerWidget *box, ShowLayerOptions options = CloseOtherLayers);
 void hideLayer(bool fast = false);
+void hideSettingsAndLayer(bool fast = false);
 bool isLayerShown();
 bool isMediaViewShown();
 bool isInlineItemBeingChosen();
@@ -127,7 +130,7 @@ void botCommandsChanged(UserData *user);
 void inlineBotRequesting(bool requesting);
 void replyMarkupUpdated(const HistoryItem *item);
 void inlineKeyboardMoved(const HistoryItem *item, int oldKeyboardTop, int newKeyboardTop);
-bool switchInlineBotButtonReceived(const QString &query);
+bool switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot = nullptr, MsgId samePeerReplyTo = 0);
 
 void migrateUpdated(PeerData *peer);
 
@@ -140,6 +143,14 @@ void historyMuteUpdated(History *history);
 // handle pending resize() / paint() on history items
 void handlePendingHistoryUpdate();
 void unreadCounterUpdated();
+
+enum class ChangeType {
+	SoundEnabled,
+	IncludeMuted,
+	DesktopEnabled,
+	ViewParams,
+	UseNative,
+};
 
 } // namespace Notify
 
@@ -162,7 +173,7 @@ uint64 UserTag();
 DeclareReadOnlyVar(QString, LangSystemISO);
 DeclareReadOnlyVar(int32, LangSystem);
 DeclareVar(QByteArray, LastCrashDump);
-DeclareVar(ConnectionProxy, PreLaunchProxy);
+DeclareVar(ProxyData, PreLaunchProxy);
 
 } // namespace Sandbox
 
@@ -229,9 +240,12 @@ DeclareRefVar(SingleDelayedCall, HandleHistoryUpdate);
 DeclareRefVar(SingleDelayedCall, HandleUnreadCounterUpdate);
 DeclareRefVar(SingleDelayedCall, HandleFileDialogQueue);
 DeclareRefVar(SingleDelayedCall, HandleDelayedPeerUpdates);
+DeclareRefVar(SingleDelayedCall, HandleObservables);
 
 DeclareVar(Adaptive::Layout, AdaptiveLayout);
 DeclareVar(bool, AdaptiveForWide);
+DeclareRefVar(base::Observable<void>, AdaptiveChanged);
+
 DeclareVar(bool, DialogsModeEnabled);
 DeclareVar(Dialogs::Mode, DialogsMode);
 DeclareVar(bool, ModerateModeEnabled);
@@ -281,9 +295,40 @@ DeclareVar(MTP::DcOptions, DcOptions);
 typedef QMap<uint64, QPixmap> CircleMasksMap;
 DeclareRefVar(CircleMasksMap, CircleMasks);
 
+DeclareRefVar(base::Observable<void>, SelfChanged);
+
+DeclareVar(bool, AskDownloadPath);
+DeclareVar(QString, DownloadPath);
+DeclareVar(QByteArray, DownloadPathBookmark);
+DeclareRefVar(base::Observable<void>, DownloadPathChanged);
+
+DeclareVar(bool, SoundNotify);
+DeclareVar(bool, DesktopNotify);
+DeclareVar(bool, RestoreSoundNotifyFromTray);
+DeclareVar(bool, IncludeMuted);
+DeclareVar(DBINotifyView, NotifyView);
+DeclareVar(bool, WindowsNotifications);
+DeclareVar(bool, CustomNotifies);
+DeclareRefVar(base::Observable<Notify::ChangeType>, NotifySettingsChanged);
+
+DeclareVar(DBIConnectionType, ConnectionType);
+DeclareVar(bool, TryIPv6);
+DeclareVar(ProxyData, ConnectionProxy);
+DeclareRefVar(base::Observable<void>, ConnectionTypeChanged);
+
+DeclareRefVar(base::Observable<void>, ChooseCustomLang);
+
+DeclareVar(int, AutoLock);
+DeclareVar(bool, LocalPasscode);
+DeclareRefVar(base::Observable<void>, LocalPasscodeChanged);
+
 } // namespace Global
 
 namespace Adaptive {
+
+inline base::Observable<void> &Changed() {
+	return Global::RefAdaptiveChanged();
+}
 
 inline bool OneColumn() {
 	return Global::AdaptiveLayout() == OneColumnLayout;
@@ -300,7 +345,7 @@ inline bool Wide() {
 namespace DebugLogging {
 
 inline bool FileLoader() {
-	return (Global::DebugLoggingFlags() | FileLoaderFlag) != 0;
+	return (Global::DebugLoggingFlags() & FileLoaderFlag) != 0;
 }
 
 } // namespace DebugLogging

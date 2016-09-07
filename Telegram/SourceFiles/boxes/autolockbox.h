@@ -26,22 +26,18 @@ class AutoLockBox : public AbstractBox {
 	Q_OBJECT
 
 public:
-
 	AutoLockBox();
-	void paintEvent(QPaintEvent *e);
-	~AutoLockBox();
 
 public slots:
-
 	void onChange();
 
 protected:
+	void paintEvent(QPaintEvent *e) override;
 
-	void hideAll();
-	void showAll();
+	void showAll() override;
 
 private:
-
 	QVector<Radiobutton*> _options;
 	BoxButton _close;
+
 };

@@ -24,7 +24,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "stickersetbox.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "settingswidget.h"
 #include "boxes/confirmbox.h"
 #include "apiwrap.h"
 #include "localstorage.h"
@@ -396,15 +395,6 @@ void StickerSetBox::onUpdateButtons() {
 
 void StickerSetBox::onScroll() {
 	_inner.setScrollBottom(_scroll.scrollTop() + _scroll.height());
-}
-
-void StickerSetBox::hideAll() {
-	ScrollableBox::hideAll();
-	_shadow.hide();
-	_cancel.hide();
-	_add.hide();
-	_share.hide();
-	_done.hide();
 }
 
 void StickerSetBox::showAll() {
@@ -1674,20 +1664,6 @@ void StickersBox::onSave() {
 	} else {
 		MTP::sendAnything();
 	}
-}
-
-void StickersBox::hideAll() {
-	if (_topShadow) {
-		_topShadow->hide();
-	}
-	if (_save) {
-		_save->hide();
-	}
-	if (_cancel) {
-		_cancel->hide();
-		_bottomShadow->hide();
-	}
-	ItemListBox::hideAll();
 }
 
 void StickersBox::showAll() {

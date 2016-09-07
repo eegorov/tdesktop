@@ -111,7 +111,7 @@ int CoverWidget::countPhotoLeft(int newWidth) const {
 	return qMin(result, st::profilePhotoLeftMax);
 }
 
-void CoverWidget::resizeToWidth(int newWidth) {
+int CoverWidget::resizeGetHeight(int newWidth) {
 	int newHeight = 0;
 
 	newHeight += st::profileMarginTop;
@@ -137,9 +137,8 @@ void CoverWidget::resizeToWidth(int newWidth) {
 
 	newHeight += st::profileBlocksTop;
 
-	resizeDropArea();
-	resize(newWidth, newHeight);
-	update();
+	resizeDropArea(newWidth);
+	return newHeight;
 }
 
 void CoverWidget::refreshNameGeometry(int newWidth) {
@@ -159,9 +158,9 @@ void CoverWidget::refreshNameGeometry(int newWidth) {
 // for each text button. But currently we use only one, so it is done easily:
 // There can be primary + secondary + icon buttons. If primary + secondary fit,
 // then icon is hidden, otherwise secondary is hidden and icon is shown.
-void CoverWidget::moveAndToggleButtons(int newWiddth) {
+void CoverWidget::moveAndToggleButtons(int newWidth) {
 	int buttonLeft = _userpicButton->x() + _userpicButton->width() + st::profileButtonLeft;
-	int buttonsRight = newWiddth - st::profileButtonSkip;
+	int buttonsRight = newWidth - st::profileButtonSkip;
 	for (int i = 0, count = _buttons.size(); i < count; ++i) {
 		auto &button = _buttons.at(i);
 		button.widget->moveToLeft(buttonLeft, st::profileButtonTop);
@@ -210,9 +209,9 @@ void CoverWidget::paintEvent(QPaintEvent *e) {
 	paintDivider(p);
 }
 
-void CoverWidget::resizeDropArea() {
+void CoverWidget::resizeDropArea(int newWidth) {
 	if (_dropArea) {
-		_dropArea->setGeometry(0, 0, width(), _dividerTop);
+		_dropArea->setGeometry(0, 0, newWidth, _dividerTop);
 	}
 }
 
@@ -277,7 +276,7 @@ void CoverWidget::dragEnterEvent(QDragEnterEvent *e) {
 			subtitle = lang(lng_profile_drop_area_subtitle_channel);
 		}
 		_dropArea = new CoverDropArea(this, title, subtitle);
-		resizeDropArea();
+		resizeDropArea(width());
 	}
 	_dropArea->showAnimated();
 	e->setDropAction(Qt::CopyAction);
@@ -315,9 +314,10 @@ void CoverWidget::dropEvent(QDropEvent *e) {
 }
 
 void CoverWidget::paintDivider(Painter &p) {
-	st::profileDividerLeft.paint(p, QPoint(st::lineWidth, _dividerTop), width());
+	auto dividerLeft = (Adaptive::OneColumn() ? 0 : st::lineWidth);
+	st::profileDividerLeft.paint(p, QPoint(dividerLeft, _dividerTop), width());
 
-	int toFillLeft = st::lineWidth + st::profileDividerLeft.width();
+	int toFillLeft = dividerLeft + st::profileDividerLeft.width();
 	QRect toFill = rtlrect(toFillLeft, _dividerTop, width() - toFillLeft, st::profileDividerFill.height(), width());
 	st::profileDividerFill.fill(p, toFill);
 }
@@ -346,6 +346,7 @@ void CoverWidget::refreshStatusText() {
 	if (auto app = App::app()) {
 		if (app->isPhotoUpdating(_peer->id)) {
 			_statusText = lang(lng_settings_uploading_photo);
+			_statusTextIsOnline = false;
 			if (!_cancelPhotoUpload) {
 				_cancelPhotoUpload = new LinkButton(this, lang(lng_cancel), st::btnDefLink);
 				connect(_cancelPhotoUpload, SIGNAL(clicked()), this, SLOT(onCancelPhotoUpload()));
@@ -508,7 +509,7 @@ void CoverWidget::showSetPhotoBox(const QImage &img) {
 	}
 
 	auto box = new PhotoCropBox(img, _peer);
-	connect(box, SIGNAL(closed()), this, SLOT(onPhotoUploadStatusChanged()));
+	connect(box, SIGNAL(closed(LayerWidget*)), this, SLOT(onPhotoUploadStatusChanged()));
 	Ui::showLayer(box);
 }
 

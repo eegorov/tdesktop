@@ -18,12 +18,16 @@
 # Copyright (c) 2014 John Preston, https://desktop.telegram.org
 
 {
+  'includes': [
+    'common.gypi',
+  ],
   'targets': [{
     'target_name': 'Telegram',
     'variables': {
       'libs_loc': '../../../Libraries',
       'src_loc': '../SourceFiles',
       'res_loc': '../Resources',
+      'minizip_loc': '../ThirdParty/minizip',
       'style_files': [
         '<(res_loc)/basic.style',
         '<(res_loc)/basic_types.style',
@@ -33,15 +37,25 @@
         '<(src_loc)/media/view/mediaview.style',
         '<(src_loc)/overview/overview.style',
         '<(src_loc)/profile/profile.style',
+        '<(src_loc)/settings/settings.style',
         '<(src_loc)/ui/widgets/widgets.style',
       ],
-      'qrc_files': [
-        '<(res_loc)/telegram.qrc',
-        '<(res_loc)/telegram_emojis.qrc',
+      'langpacks': [
+        'en',
+        'de',
+        'es',
+        'it',
+        'nl',
+        'ko',
+        'pt-BR',
       ],
     },
     'includes': [
       'common_executable.gypi',
+      'telegram_qrc.gypi',
+      'telegram_win.gypi',
+      'telegram_mac.gypi',
+      'telegram_linux.gypi',
       'qt.gypi',
       'codegen_rules.gypi',
     ],
@@ -66,10 +80,7 @@
       '<(libs_loc)/zlib-1.2.8',
       '<(libs_loc)/ffmpeg',
       '<(libs_loc)/openal-soft/include',
-      '../ThirdParty/minizip',
-    ],
-    'library_dirs': [
-      '<(libs_loc)/ffmpeg',
+      '<(minizip_loc)',
     ],
     'sources': [
       '<@(qrc_files)',
@@ -85,6 +96,7 @@
       '<(src_loc)/application.h',
       '<(src_loc)/autoupdater.cpp',
       '<(src_loc)/autoupdater.h',
+      '<(src_loc)/config.h',
       '<(src_loc)/dialogswidget.cpp',
       '<(src_loc)/dialogswidget.h',
       '<(src_loc)/dropdown.cpp',
@@ -125,8 +137,6 @@
       '<(src_loc)/mainwidget.h',
       '<(src_loc)/settings.cpp',
       '<(src_loc)/settings.h',
-      '<(src_loc)/settingswidget.cpp',
-      '<(src_loc)/settingswidget.h',
       '<(src_loc)/shortcuts.cpp',
       '<(src_loc)/shortcuts.h',
       '<(src_loc)/structs.cpp',
@@ -161,6 +171,8 @@
       '<(src_loc)/boxes/emojibox.h',
       '<(src_loc)/boxes/languagebox.cpp',
       '<(src_loc)/boxes/languagebox.h',
+      '<(src_loc)/boxes/localstoragebox.cpp',
+      '<(src_loc)/boxes/localstoragebox.h',
       '<(src_loc)/boxes/passcodebox.cpp',
       '<(src_loc)/boxes/passcodebox.h',
       '<(src_loc)/boxes/photocropbox.cpp',
@@ -181,10 +193,12 @@
       '<(src_loc)/core/click_handler.h',
       '<(src_loc)/core/click_handler_types.cpp',
       '<(src_loc)/core/click_handler_types.h',
+      '<(src_loc)/core/lambda_wrap.h',
       '<(src_loc)/core/observer.cpp',
       '<(src_loc)/core/observer.h',
       '<(src_loc)/core/qthelp_url.cpp',
       '<(src_loc)/core/qthelp_url.h',
+      '<(src_loc)/core/vector_of_moveable.h',
       '<(src_loc)/data/data_abstract_structure.cpp',
       '<(src_loc)/data/data_abstract_structure.h',
       '<(src_loc)/data/data_drafts.cpp',
@@ -277,6 +291,12 @@
       '<(src_loc)/overview/overview_layout.h',
       '<(src_loc)/pspecific_win.cpp',
       '<(src_loc)/pspecific_win.h',
+      '<(src_loc)/pspecific_mac.cpp',
+      '<(src_loc)/pspecific_mac.h',
+      '<(src_loc)/pspecific_mac_p.mm',
+      '<(src_loc)/pspecific_mac_p.h',
+      '<(src_loc)/pspecific_linux.cpp',
+      '<(src_loc)/pspecific_linux.h',
       '<(src_loc)/platform/linux/linux_gdk_helper.cpp',
       '<(src_loc)/platform/linux/linux_gdk_helper.h',
       '<(src_loc)/platform/linux/linux_libs.cpp',
@@ -329,6 +349,32 @@
       '<(src_loc)/serialize/serialize_common.h',
       '<(src_loc)/serialize/serialize_document.cpp',
       '<(src_loc)/serialize/serialize_document.h',
+      '<(src_loc)/settings/settings_advanced_widget.cpp',
+      '<(src_loc)/settings/settings_advanced_widget.h',
+      '<(src_loc)/settings/settings_background_widget.cpp',
+      '<(src_loc)/settings/settings_background_widget.h',
+      '<(src_loc)/settings/settings_block_widget.cpp',
+      '<(src_loc)/settings/settings_block_widget.h',
+      '<(src_loc)/settings/settings_chat_settings_widget.cpp',
+      '<(src_loc)/settings/settings_chat_settings_widget.h',
+      '<(src_loc)/settings/settings_cover.cpp',
+      '<(src_loc)/settings/settings_cover.h',
+      '<(src_loc)/settings/settings_fixed_bar.cpp',
+      '<(src_loc)/settings/settings_fixed_bar.h',
+      '<(src_loc)/settings/settings_general_widget.cpp',
+      '<(src_loc)/settings/settings_general_widget.h',
+      '<(src_loc)/settings/settings_info_widget.cpp',
+      '<(src_loc)/settings/settings_info_widget.h',
+      '<(src_loc)/settings/settings_inner_widget.cpp',
+      '<(src_loc)/settings/settings_inner_widget.h',
+      '<(src_loc)/settings/settings_notifications_widget.cpp',
+      '<(src_loc)/settings/settings_notifications_widget.h',
+      '<(src_loc)/settings/settings_privacy_widget.cpp',
+      '<(src_loc)/settings/settings_privacy_widget.h',
+      '<(src_loc)/settings/settings_scale_widget.cpp',
+      '<(src_loc)/settings/settings_scale_widget.h',
+      '<(src_loc)/settings/settings_widget.cpp',
+      '<(src_loc)/settings/settings_widget.h',
       '<(src_loc)/ui/buttons/history_down_button.cpp',
       '<(src_loc)/ui/buttons/history_down_button.h',
       '<(src_loc)/ui/buttons/icon_button.cpp',
@@ -365,6 +411,7 @@
       '<(src_loc)/ui/toast/toast_widget.h',
       '<(src_loc)/ui/widgets/label_simple.cpp',
       '<(src_loc)/ui/widgets/label_simple.h',
+      '<(src_loc)/ui/widgets/widget_slide_wrap.h',
       '<(src_loc)/ui/animation.cpp',
       '<(src_loc)/ui/animation.h',
       '<(src_loc)/ui/boxshadow.cpp',
@@ -397,6 +444,8 @@
       '<(src_loc)/ui/scrollarea.h',
       '<(src_loc)/ui/twidget.cpp',
       '<(src_loc)/ui/twidget.h',
+      '<(src_loc)/window/chat_background.cpp',
+      '<(src_loc)/window/chat_background.h',
       '<(src_loc)/window/main_window.cpp',
       '<(src_loc)/window/main_window.h',
       '<(src_loc)/window/section_widget.cpp',
@@ -407,20 +456,6 @@
       '<(src_loc)/window/top_bar_widget.h',
     ],
     'configurations': {
-      'Debug': {
-        'include_dirs': [
-          '<(libs_loc)/openssl_debug/Debug/include',
-        ],
-        'library_dirs': [
-          '<(libs_loc)/lzma/C/Util/LzmaLib/Debug',
-          '<(libs_loc)/libexif-0.6.20/win32/Debug',
-          '<(libs_loc)/opus/win32/VS2010/Win32/Debug',
-          '<(libs_loc)/openal-soft/build/Debug',
-          '<(libs_loc)/zlib-1.2.8/contrib/vstudio/vc11/x86/ZlibStatDebug',
-          '<(libs_loc)/openssl_debug/Debug/lib',
-          '<(libs_loc)/breakpad/src/client/windows/Debug',
-        ],
-      },
       'Release': {
         'conditions': [
           ['"<(official_build_target)" != ""', {
@@ -429,79 +464,18 @@
             ],
           }],
         ],
-        'include_dirs': [
-          '<(libs_loc)/openssl/Release/include',
-        ],
-        'library_dirs': [
-          '<(libs_loc)/lzma/C/Util/LzmaLib/Release',
-          '<(libs_loc)/libexif-0.6.20/win32/Release',
-          '<(libs_loc)/opus/win32/VS2010/Win32/Release',
-          '<(libs_loc)/openal-soft/build/Release',
-          '<(libs_loc)/zlib-1.2.8/contrib/vstudio/vc11/x86/ZlibStatRelease',
-          '<(libs_loc)/openssl/Release/lib',
-          '<(libs_loc)/breakpad/src/client/windows/Release',
-        ],
       },
     },
-    'libraries': [
-      'libeay32',
-      'ssleay32',
-      'Crypt32',
-      'zlibstat',
-      'LzmaLib',
-      'lib_exif',
-      'UxTheme',
-      'DbgHelp',
-      'OpenAL32',
-      'common',
-      'libavformat\libavformat.a',
-      'libavcodec\libavcodec.a',
-      'libavutil\libavutil.a',
-      'libswresample\libswresample.a',
-      'libswscale\libswscale.a',
-      'opus',
-      'celt',
-      'silk_common',
-      'silk_float',
-      'lib\common',
-      'lib\exception_handler',
-      'lib\crash_generation_client',
-    ],
     'conditions': [
       [ '"<(official_build_target)" != ""', {
         'dependencies': [
           'utils.gyp:Packer',
         ],
       }],
-      [ 'build_linux', {
-        'variables': {
-          'qrc_files': [
-            '<(res_loc)/telegram_linux.qrc',
-          ],
-        }
-      }],
-      [ 'build_mac', {
-        'variables': {
-          'qrc_files': [
-            '<(res_loc)/telegram_mac.qrc',
-          ],
-        }
-      }],
-      [ 'build_win', {
-        'msvs_precompiled_source': '<(src_loc)/stdafx.cpp',
-        'msvs_precompiled_header': '<(src_loc)/stdafx.h',
-        'msbuild_toolset': 'v140_xp',     #Windows7.1SDK
-        'sources': [
-          '<(res_loc)/winrc/Telegram.rc',
-        ],
-        'variables': {
-          'qrc_files': [
-            '<(res_loc)/telegram_wnd.qrc',
-          ],
-        }
-      }],
       [ '"<(build_linux)" != "1"', {
         'sources!': [
+          '<(src_loc)/pspecific_linux.cpp',
+          '<(src_loc)/pspecific_linux.h',
           '<(src_loc)/platform/linux/linux_gdk_helper.cpp',
           '<(src_loc)/platform/linux/linux_gdk_helper.h',
           '<(src_loc)/platform/linux/linux_libs.cpp',
@@ -514,12 +488,25 @@
       }],
       [ '"<(build_mac)" != "1"', {
         'sources!': [
+          '<(src_loc)/pspecific_mac.cpp',
+          '<(src_loc)/pspecific_mac.h',
+          '<(src_loc)/pspecific_mac_p.mm',
+          '<(src_loc)/pspecific_mac_p.h',
           '<(src_loc)/platform/mac/main_window_mac.mm',
           '<(src_loc)/platform/mac/main_window_mac.h',
         ],
       }],
       [ '"<(build_win)" != "1"', {
+        'sources': [
+          '<(minizip_loc)/crypt.h',
+          '<(minizip_loc)/ioapi.c',
+          '<(minizip_loc)/ioapi.h',
+          '<(minizip_loc)/zip.c',
+          '<(minizip_loc)/zip.h',
+        ],
         'sources!': [
+          '<(src_loc)/pspecific_win.cpp',
+          '<(src_loc)/pspecific_win.h',
           '<(src_loc)/platform/win/main_window_win.cpp',
           '<(src_loc)/platform/win/main_window_win.h',
           '<(src_loc)/platform/win/windows_app_user_model_id.cpp',

@@ -24,6 +24,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "lang.h"
 #include "styles/style_profile.h"
 #include "boxes/confirmbox.h"
+#include "mainwindow.h"
 
 ReportBox::ReportBox(ChannelData *channel) : AbstractBox(st::boxWidth)
 , _channel(channel)
@@ -65,6 +66,7 @@ void ReportBox::resizeEvent(QResizeEvent *e) {
 
 	_report->moveToRight(st::boxButtonPadding.right(), height() - st::boxButtonPadding.bottom() - _report->height());
 	_cancel->moveToRight(st::boxButtonPadding.right() + _report->width() + st::boxButtonPadding.left(), _report->y());
+	AbstractBox::resizeEvent(e);
 }
 
 void ReportBox::onChange() {
@@ -85,10 +87,10 @@ void ReportBox::onChange() {
 		_reasonOtherText.destroy();
 		updateMaxHeight();
 	}
-	setInnerFocus();
+	if (App::wnd()) App::wnd()->setInnerFocus();
 }
 
-void ReportBox::setInnerFocus() {
+void ReportBox::doSetInnerFocus() {
 	if (_reasonOtherText) {
 		_reasonOtherText->setFocus();
 	} else {

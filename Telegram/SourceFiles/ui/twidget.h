@@ -206,7 +206,19 @@ public:
 		return QPointer<const TWidget>(this);
 	}
 
-	virtual ~TWidget() {
+	// Get the size of the widget as it should be.
+	// Negative return value means no default width.
+	virtual int naturalWidth() const {
+		return -1;
+	}
+
+	// Count new height for width=newWidth and resize to it.
+	void resizeToWidth(int newWidth) {
+		auto newSize = QSize(newWidth, resizeGetHeight(newWidth));
+		if (newSize != size()) {
+			resize(newSize);
+			update();
+		}
 	}
 
 protected:
@@ -215,6 +227,11 @@ protected:
 	}
 	void leaveEventHook(QEvent *e) {
 		return QWidget::leaveEvent(e);
+	}
+
+	// Resizes content and counts natural widget height for the desired width.
+	virtual int resizeGetHeight(int newWidth) {
+		return height();
 	}
 
 };
@@ -275,16 +292,16 @@ public:
 	SingleDelayedCall(QObject *parent, const char *member) : QObject(parent), _member(member) {
 	}
 	void call() {
-		if (!_pending.loadAcquire()) {
-			_pending.storeRelease(1);
+		if (_pending.testAndSetOrdered(0, 1)) {
 			QMetaObject::invokeMethod(this, "makeDelayedCall", Qt::QueuedConnection);
 		}
 	}
 
 private slots:
 	void makeDelayedCall() {
-		_pending.storeRelease(0);
-		QMetaObject::invokeMethod(parent(), _member);
+		if (_pending.testAndSetOrdered(1, 0)) {
+			QMetaObject::invokeMethod(parent(), _member);
+		}
 	}
 
 private:
@@ -326,8 +343,11 @@ public:
 	}
 
 	// So we can pass this pointer to methods like connect().
-	operator T*() const {
+	T *ptr() const {
 		return _widget;
+	}
+	operator T*() const {
+		return ptr();
 	}
 
 	void destroy() {

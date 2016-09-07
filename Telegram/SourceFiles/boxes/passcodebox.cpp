@@ -39,7 +39,7 @@ PasscodeBox::PasscodeBox(bool turningOff) : AbstractBox(st::boxWidth)
 , _saveButton(this, lang(_turningOff ? lng_passcode_remove_button : lng_settings_save), st::defaultBoxButton)
 , _cancelButton(this, lang(lng_cancel), st::cancelBoxButton)
 , _oldPasscode(this, st::defaultInputField, lang(lng_passcode_enter_old))
-, _newPasscode(this, st::defaultInputField, lang(cHasPasscode() ? lng_passcode_enter_new : lng_passcode_enter_first))
+, _newPasscode(this, st::defaultInputField, lang(Global::LocalPasscode() ? lng_passcode_enter_new : lng_passcode_enter_first))
 , _reenterPasscode(this, st::defaultInputField, lang(lng_passcode_confirm_new))
 , _passwordHint(this, st::defaultInputField, lang(lng_cloud_password_hint))
 , _recoverEmail(this, st::defaultInputField, lang(lng_cloud_password_email))
@@ -86,7 +86,7 @@ void PasscodeBox::init() {
 		_boxTitle = lang(_cloudPwd ? lng_cloud_password_remove : lng_passcode_remove);
 		setMaxHeight(st::boxTitleHeight + st::passcodePadding.top() + _oldPasscode.height() + st::passcodeSkip + ((_hasRecovery && !_hintText.isEmpty()) ? st::passcodeSkip : 0) + _aboutHeight + st::passcodePadding.bottom() + st::boxButtonPadding.top() + _saveButton.height() + st::boxButtonPadding.bottom());
 	} else {
-		bool has = _cloudPwd ? (!_curSalt.isEmpty()) : cHasPasscode();
+		bool has = _cloudPwd ? (!_curSalt.isEmpty()) : Global::LocalPasscode();
 		if (has) {
 			_oldPasscode.show();
 			_boxTitle = lang(_cloudPwd ? lng_cloud_password_change : lng_passcode_change);
@@ -116,20 +116,8 @@ void PasscodeBox::init() {
 	connect(&_recover, SIGNAL(clicked()), this, SLOT(onRecoverByEmail()));
 }
 
-void PasscodeBox::hideAll() {
-	_oldPasscode.hide();
-	_newPasscode.hide();
-	_reenterPasscode.hide();
-	_passwordHint.hide();
-	_recoverEmail.hide();
-	_recover.hide();
-	_saveButton.hide();
-	_cancelButton.hide();
-	AbstractBox::hideAll();
-}
-
 void PasscodeBox::showAll() {
-	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : cHasPasscode();
+	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : Global::LocalPasscode();
 	if (_turningOff) {
 		_oldPasscode.show();
 		if (_cloudPwd && _hasRecovery) {
@@ -137,9 +125,10 @@ void PasscodeBox::showAll() {
 		} else {
 			_recover.hide();
 		}
-		_passwordHint.hide();
 		_newPasscode.hide();
 		_reenterPasscode.hide();
+		_passwordHint.hide();
+		_recoverEmail.hide();
 	} else {
 		if (has) {
 			_oldPasscode.show();
@@ -171,7 +160,7 @@ void PasscodeBox::showAll() {
 }
 
 void PasscodeBox::onSubmit() {
-	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : cHasPasscode();
+	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : Global::LocalPasscode();
 	if (_oldPasscode.hasFocus()) {
 		if (_turningOff) {
 			onSave();
@@ -242,7 +231,7 @@ void PasscodeBox::paintEvent(QPaintEvent *e) {
 }
 
 void PasscodeBox::resizeEvent(QResizeEvent *e) {
-	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : cHasPasscode();
+	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : Global::LocalPasscode();
 	int32 w = st::boxWidth - st::boxPadding.left() - st::boxPadding.right();
 	_oldPasscode.resize(w, _oldPasscode.height());
 	_oldPasscode.moveToLeft(st::boxPadding.left(), st::boxTitleHeight + st::passcodePadding.top());
@@ -265,7 +254,7 @@ void PasscodeBox::resizeEvent(QResizeEvent *e) {
 	AbstractBox::resizeEvent(e);
 }
 
-void PasscodeBox::showDone() {
+void PasscodeBox::doSetInnerFocus() {
 	if (_skipEmailWarning && !_recoverEmail.isHidden()) {
 		_recoverEmail.setFocus();
 	} else if (_oldPasscode.isHidden()) {
@@ -273,7 +262,6 @@ void PasscodeBox::showDone() {
 	} else {
 		_oldPasscode.setFocus();
 	}
-	_skipEmailWarning = false;
 }
 
 void PasscodeBox::setPasswordDone(const MTPBool &result) {
@@ -336,7 +324,7 @@ void PasscodeBox::onSave(bool force) {
 	if (_setRequest) return;
 
 	QString old = _oldPasscode.text(), pwd = _newPasscode.text(), conf = _reenterPasscode.text();
-	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : cHasPasscode();
+	bool has = _cloudPwd ? (!_curSalt.isEmpty()) : Global::LocalPasscode();
 	if (!_cloudPwd && (_turningOff || has)) {
 		if (!passcodeCanTry()) {
 			_oldError = lang(lng_flood_error);
@@ -419,7 +407,7 @@ void PasscodeBox::onSave(bool force) {
 		Local::setPasscode(pwd.toUtf8());
 		App::wnd()->checkAutoLock();
 		App::wnd()->getTitle()->showUpdateBtn();
-		emit closed();
+		onClose();
 	}
 }
 
@@ -523,13 +511,6 @@ RecoverBox::RecoverBox(const QString &pattern) : AbstractBox(st::boxWidth)
 	prepare();
 }
 
-void RecoverBox::hideAll() {
-	_recoverCode.hide();
-	_saveButton.hide();
-	_cancelButton.hide();
-	AbstractBox::hideAll();
-}
-
 void RecoverBox::showAll() {
 	_recoverCode.show();
 	_saveButton.show();
@@ -564,7 +545,7 @@ void RecoverBox::resizeEvent(QResizeEvent *e) {
 	AbstractBox::resizeEvent(e);
 }
 
-void RecoverBox::showDone() {
+void RecoverBox::doSetInnerFocus() {
 	_recoverCode.setFocus();
 }
 
