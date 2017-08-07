@@ -44,6 +44,7 @@ bool loadLibrary(QLibrary &lib, const char *name, int version) {
     return false;
 }
 
+#ifndef TDESKTOP_GTK_MUST_DIE
 bool setupGtkBase(QLibrary &lib_gtk) {
 	if (!load(lib_gtk, "gtk_init_check", gtk_init_check)) return false;
 	if (!load(lib_gtk, "gtk_menu_new", gtk_menu_new)) return false;
@@ -142,9 +143,11 @@ bool setupAppIndicator(QLibrary &lib_indicator) {
 	DEBUG_LOG(("Library appindicator functions loaded!"));
 	return true;
 }
+#endif // !TDESKTOP_GTK_MUST_DIE
 
 } // namespace
 
+#ifndef TDESKTOP_GTK_MUST_DIE
 f_gtk_init_check gtk_init_check = nullptr;
 f_gtk_menu_new gtk_menu_new = nullptr;
 f_gtk_menu_get_type gtk_menu_get_type = nullptr;
@@ -235,9 +238,11 @@ f_unity_launcher_entry_set_count unity_launcher_entry_set_count = nullptr;
 f_unity_launcher_entry_set_count_visible unity_launcher_entry_set_count_visible = nullptr;
 f_unity_launcher_entry_get_for_desktop_id unity_launcher_entry_get_for_desktop_id = nullptr;
 #endif // !TDESKTOP_DISABLE_UNITY_INTEGRATION
+#endif // !TDESKTOP_GTK_MUST_DIE
 
 void start() {
 	DEBUG_LOG(("Loading libraries"));
+#ifndef TDESKTOP_GTK_MUST_DIE
 
 	bool gtkLoaded = false;
 	bool indicatorLoaded = false;
@@ -310,6 +315,7 @@ void start() {
 	if (gtkLoaded) {
 		startLibNotify();
 	}
+#endif // !TDESKTOP_GTK_MUST_DIE
 }
 
 } // namespace Libs
